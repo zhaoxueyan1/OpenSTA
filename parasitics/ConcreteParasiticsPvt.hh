@@ -229,7 +229,7 @@ public:
   void addCapacitor(ParasiticCapacitor *capacitor);
   virtual PinSet unannotatedLoads(const Pin *drvr_pin,
                                   const Parasitics *parasitics) const;
-
+  ConcreteParasiticSubNodeMap* subNodes(){ return &sub_nodes_; }
 private:
   void unannotatedLoads(ParasiticNode *node,
                         ParasiticResistor *from_res,

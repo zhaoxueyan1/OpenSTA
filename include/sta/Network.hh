@@ -434,7 +434,9 @@ public:
   // Escape prefix for path dividers in path names.
   virtual char pathEscape() const { return escape_; }
   virtual void setPathEscape(char escape);
-
+  void findNetsHierMatching(const Instance *instance,
+                            const PatternMatch *pattern,
+                            NetSeq &matches) const;
 protected:
   Pin *findPinLinear(const Instance *instance,
 		     const char *port_name) const;
@@ -448,9 +450,7 @@ protected:
   void findNetsMatching(const Instance *context,
                         const PatternMatch *pattern,
                         NetSeq &matches) const;
-  void findNetsHierMatching(const Instance *instance,
-                            const PatternMatch *pattern,
-                            NetSeq &matches) const;
+
   void findPinsHierMatching(const Instance *instance,
                             const PatternMatch *pattern,
                             // Return value.

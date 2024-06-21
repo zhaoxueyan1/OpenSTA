@@ -445,6 +445,14 @@ public:
 			 float delay);
   void removeClockInsertion(const Clock *clk,
 			    const Pin *pin);
+            // Indexed by corner_index.
+  vector<PortExtCapMap> port_ext_cap_maps_;
+  // set_load net
+  // Indexed by corner_index.
+  vector<NetWireCapMap> net_wire_cap_maps_;
+  // Indexed by corner_index.
+  vector<PinWireCapMap> drvr_pin_wire_cap_maps_;
+  InputDriveMap input_drive_map_;
   static void swapClockInsertions(Sdc *sdc1,
                                   Sdc *sdc2);
   bool hasClockInsertion(const Pin *pin) const;
@@ -1346,13 +1354,7 @@ protected:
   // External parasitics on top level ports.
   //  set_load port
   //  set_fanout_load port
-  // Indexed by corner_index.
-  vector<PortExtCapMap> port_ext_cap_maps_;
-  // set_load net
-  // Indexed by corner_index.
-  vector<NetWireCapMap> net_wire_cap_maps_;
-  // Indexed by corner_index.
-  vector<PinWireCapMap> drvr_pin_wire_cap_maps_;
+
   NetResistanceMap net_res_map_;
   PinSet disabled_pins_;
   PortSet disabled_ports_;
@@ -1389,7 +1391,7 @@ protected:
   bool path_delays_without_to_;
   // Group path exception names.
   GroupPathMap group_path_map_;
-  InputDriveMap input_drive_map_;
+  
   // set_LogicValue::one/zero/dc
   LogicValueMap logic_value_map_;
   // set_case_analysis
