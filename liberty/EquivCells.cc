@@ -260,8 +260,8 @@ equivCells(const LibertyCell *cell1,
 {
   return equivCellPortsAndFuncs(cell1, cell2)
     && equivCellPgPorts(cell1, cell2)
-    && equivCellSequentials(cell1, cell2)
-    && equivCellTimingArcSets(cell1, cell2);
+    && equivCellSequentials(cell1, cell2);
+    // && equivCellTimingArcSets(cell1, cell2);
 }
 
 bool
