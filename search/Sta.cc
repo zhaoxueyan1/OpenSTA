@@ -579,8 +579,8 @@ Sta::networkChanged()
   // Everything else from clear().
   search_->clear();
   levelize_->clear();
-  if (parasitics_)
-    parasitics_->clear();
+  // if (parasitics_)
+  //   parasitics_->clear();
   graph_delay_calc_->clear();
   sim_->clear();
   if (check_min_pulse_widths_)
