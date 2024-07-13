@@ -581,6 +581,27 @@ Sta::networkChanged()
   // Everything else from clear().
   search_->clear();
   levelize_->clear();
+  if (parasitics_)
+    parasitics_->clear();
+  graph_delay_calc_->clear();
+  sim_->clear();
+  if (check_min_pulse_widths_)
+    check_min_pulse_widths_->clear();
+  if (check_min_periods_)
+    check_min_periods_->clear();
+  delete graph_;
+  graph_ = nullptr;
+  graph_sdc_annotated_ = false;
+  current_instance_ = nullptr;
+  updateComponentsState();
+}
+
+void
+Sta::networkChanged1()
+{
+  // Everything else from clear().
+  search_->clear();
+  levelize_->clear();
   // if (parasitics_)
   //   parasitics_->clear();
   graph_delay_calc_->clear();

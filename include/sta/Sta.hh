@@ -1191,6 +1191,7 @@ public:
                            const char *direction);
   // Notify STA of network change.
   void networkChanged();
+  void networkChanged1();
   void deleteLeafInstanceBefore(const Instance *inst);
   void deleteInstancePinsBefore(const Instance *inst);
 
