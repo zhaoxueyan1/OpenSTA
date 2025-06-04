@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -21,6 +29,7 @@
 namespace sta {
 
 class Delay;
+class DelayDbl;
 class StaState;
 
 // Normal distribution with early(left)/late(right) std deviations.
@@ -29,6 +38,7 @@ class Delay
 public:
   Delay();
   Delay(const Delay &delay);
+  Delay(const DelayDbl &delay);
   Delay(float mean);
   Delay(float mean,
 	float sigma2_early,
@@ -60,6 +70,33 @@ private:
   float mean_;
   // Sigma^2
   float sigma2_[EarlyLate::index_count];
+
+  friend class DelayDbl;
+};
+
+// Dwlay with doubles for accumulating delays.
+class DelayDbl
+{
+public:
+  DelayDbl();
+  float mean() const { return mean_; }
+  float sigma() const;
+  // sigma^2
+  float sigma2() const;
+  void operator=(float delay);
+  void operator+=(const Delay &delay);
+  void operator-=(const Delay &delay);
+
+protected:
+  static const int early_index = 0;
+  static const int late_index = 1;
+
+private:
+  double mean_;
+  // Sigma^2
+  double sigma2_[EarlyLate::index_count];
+
+  friend class Delay;
 };
 
 const Delay delay_zero(0.0);

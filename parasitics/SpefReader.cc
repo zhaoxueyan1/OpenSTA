@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,10 +13,19 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "SpefReader.hh"
 
 #include "Zlib.hh"
+#include "Stats.hh"
 #include "Report.hh"
 #include "Debug.hh"
 #include "StringUtil.hh"
@@ -31,16 +40,11 @@
 #include "ArcDelayCalc.hh"
 #include "SpefReaderPvt.hh"
 #include "SpefNamespace.hh"
-
-int
-SpefParse_parse();
-void
-spefResetScanner();
+#include "parasitics/SpefScanner.hh"
 
 namespace sta {
 
-// Referenced by parser.
-SpefReader *spef_reader;
+using std::string;
 
 bool
 readSpefFile(const char *filename,
@@ -54,27 +58,14 @@ readSpefFile(const char *filename,
 	     const MinMaxAll *min_max,
              StaState *sta)
 {
-  bool success = false;
-  // Use zlib to uncompress gzip'd files automagically.
-  gzFile stream = gzopen(filename, "rb");
-  if (stream) {
-    SpefReader reader(filename, stream, instance, ap,
-		      pin_cap_included, keep_coupling_caps, coupling_cap_factor,
-		      reduce, corner, min_max, sta);
-    spef_reader = &reader;
-    ::spefResetScanner();
-    // yyparse returns 0 on success.
-    success = (::SpefParse_parse() == 0);
-    gzclose(stream);
-    spef_reader = nullptr;
-  }
-  else
-    throw FileNotReadable(filename);
+  SpefReader reader(filename, instance, ap,
+                    pin_cap_included, keep_coupling_caps, coupling_cap_factor,
+                    reduce, corner, min_max, sta);
+  bool success = reader.read();
   return success;
 }
 
 SpefReader::SpefReader(const char *filename,
-		       gzFile stream,
 		       Instance *instance,
 		       ParasiticAnalysisPt *ap,
 		       bool pin_cap_included,
@@ -93,8 +84,6 @@ SpefReader::SpefReader(const char *filename,
   reduce_(reduce),
   corner_(corner),
   min_max_(min_max),
-  stream_(stream),
-  line_(1),
   // defaults
   divider_('\0'),
   delimiter_('\0'),
@@ -119,11 +108,26 @@ SpefReader::~SpefReader()
     delete design_flow_;
     design_flow_ = nullptr;
   }
+}
 
-  for (auto index_name : name_map_) {
-    char *name = index_name.second;
-    stringDelete(name);
+bool
+SpefReader::read()
+{
+  bool success;
+  gzstream::igzstream stream(filename_);
+  if (stream.is_open()) {
+    Stats stats(debug_, report_);
+    SpefScanner scanner(&stream, filename_, this, report_);
+    scanner_ = &scanner;
+    SpefParse parser(&scanner, this);
+    //parser.set_debug_level(1);
+    // yyparse returns 0 on success.
+    success = (parser.parse() == 0);
+    stats.report("Read spef");
   }
+  else
+    throw FileNotReadable(filename_);
+  return success;
 }
 
 void
@@ -139,7 +143,8 @@ SpefReader::setDelimiter(char delimiter)
 }
 
 void
-SpefReader::setBusBrackets(char left, char right)
+SpefReader::setBusBrackets(char left,
+                           char right)
 {
   if (!((left == '[' && right == ']')
 	|| (left == '{' && right == '}')
@@ -155,13 +160,18 @@ SpefReader::setBusBrackets(char left, char right)
 Instance *
 SpefReader::findInstanceRelative(const char *name)
 {
-  return network_->findInstanceRelative(instance_, name);
+  return sdc_network_->findInstanceRelative(instance_, name);
 }
 
 Net *
 SpefReader::findNetRelative(const char *name)
 {
-  return network_->findNetRelative(instance_, name);
+  Net *net = network_->findNetRelative(instance_, name);
+  // Relax spef escaping requirement because some commercial tools
+  // don't follow the rules.
+  if (net == nullptr)
+    net = sdc_network_->findNetRelative(instance_, name);
+  return net;
 }
 
 Pin *
@@ -176,30 +186,6 @@ SpefReader::findPortPinRelative(const char *name)
   return network_->findPin(instance_, name);
 }
 
-void
-SpefReader::getChars(char *buf,
-		     int &result,
-		     size_t max_size)
-{
-  char *status = gzgets(stream_, buf, max_size);
-  if (status == Z_NULL)
-    result = 0;  // YY_nullptr
-  else
-    result = static_cast<int>(strlen(buf));
-}
-
-void
-SpefReader::getChars(char *buf,
-		     size_t &result,
-		     size_t max_size)
-{
-  char *status = gzgets(stream_, buf, max_size);
-  if (status == Z_NULL)
-    result = 0;  // YY_nullptr
-  else
-    result = strlen(buf);
-}
-
 char *
 SpefReader::translated(const char *token)
 {
@@ -208,17 +194,11 @@ SpefReader::translated(const char *token)
 }
 
 void
-SpefReader::incrLine()
-{
-  line_++;
-}
-
-void
 SpefReader::warn(int id, const char *fmt, ...)
 {
   va_list args;
   va_start(args, fmt);
-  report_->vfileWarn(id, filename_, line_, fmt, args);
+  report_->vfileWarn(id, filename_, scanner_->line(), fmt, args);
   va_end(args);
 }
 
@@ -277,21 +257,23 @@ SpefReader::setInductScale(float scale,
 }
 
 void
-SpefReader::makeNameMapEntry(char *index,
-			     char *name)
+SpefReader::makeNameMapEntry(const char *index,
+			     const char *name)
 {
   int i = atoi(index + 1);
   name_map_[i] = name;
+  stringDelete(index);
+  stringDelete(name);
 }
 
-char *
-SpefReader::nameMapLookup(char *name)
+const char *
+SpefReader::nameMapLookup(const char *name)
 {
   if (name && name[0] == '*') {
     int index = atoi(name + 1);
-    auto itr = name_map_.find(index);
+    const auto &itr = name_map_.find(index);
     if (itr != name_map_.end())
-      return itr->second;
+      return itr->second.c_str();
     else {
       warn(1645, "no name map entry for %d.", index);
       return nullptr;
@@ -330,19 +312,19 @@ SpefReader::findPin(char *name)
     char *delim = strrchr(name, delimiter_);
     if (delim) {
       *delim = '\0';
-      name = nameMapLookup(name);
-      if (name) {
-        Instance *inst = findInstanceRelative(name);
+      const char *name1 = nameMapLookup(name);
+      if (name1) {
+        Instance *inst = findInstanceRelative(name1);
         // Replace delimiter for error messages.
         *delim = delimiter_;
         const char *port_name = delim + 1;
         if (inst) {
           pin = network_->findPin(inst, port_name);
           if (pin == nullptr)
-            warn(1647, "pin %s not found.", name);
+            warn(1647, "pin %s not found.", name1);
         }
         else
-          warn(1648, "instance %s not found.", name);
+          warn(1648, "instance %s not found.", name1);
       }
     }
     else {
@@ -355,14 +337,14 @@ SpefReader::findPin(char *name)
 }
 
 Net *
-SpefReader::findNet(char *name)
+SpefReader::findNet(const char *name)
 {
   Net *net = nullptr;
-  name = nameMapLookup(name);
-  if (name) {
-    net = findNetRelative(name);
+  const char *name1 = nameMapLookup(name);
+  if (name1) {
+    net = findNetRelative(name1);
     if (net == nullptr)
-      warn(1650, "net %s not found.", name);
+      warn(1650, "net %s not found.", name1);
   }
   return net;
 }
@@ -467,26 +449,26 @@ SpefReader::findParasiticNode(char *name,
     if (delim) {
       *delim = '\0';
       char *name2 = delim + 1;
-      name = nameMapLookup(name);
-      if (name) {
-        Instance *inst = findInstanceRelative(name);
+      const char *name1 = nameMapLookup(name);
+      if (name1) {
+        Instance *inst = findInstanceRelative(name1);
         if (inst) {
           // <instance>:<port>
           Pin *pin = network_->findPin(inst, name2);
           if (pin) {
             if (local_only
                 && !network_->isConnected(net_, pin))
-              warn(1651, "%s not connected to net %s.", name, network_->pathName(net_));
+              warn(1651, "%s not connected to net %s.", name1, network_->pathName(net_));
             return parasitics_->ensureParasiticNode(parasitic_, pin, network_);
           }
           else {
             // Replace delimiter for error message.
             *delim = delimiter_;
-            warn(1652, "pin %s not found.", name);
+            warn(1652, "pin %s not found.", name1);
           }
         }
         else {
-          Net *net = findNet(name);
+          Net *net = findNet(name1);
           // Replace delimiter for error messages.
           *delim = delimiter_;
           if (net) {
@@ -496,27 +478,33 @@ SpefReader::findParasiticNode(char *name,
               int id = atoi(id_str);
               if (local_only
                   && !network_->isConnected(net, net_))
-                warn(1653, "%s not connected to net %s.", name, network_->pathName(net_));
+                warn(1653, "%s not connected to net %s.",
+                     name1,
+                     network_->pathName(net_));
               return parasitics_->ensureParasiticNode(parasitic_, net, id, network_);
             }
             else
-              warn(1654, "node %s not a pin or net:number", name);
+              warn(1654, "node %s not a pin or net:number", name1);
           }
         }
       }
     }
     else {
       // <top_level_port>
-      name = nameMapLookup(name);
-      Pin *pin = findPortPinRelative(name);
-      if (pin) {
-        if (local_only
-            && !network_->isConnected(net_, pin))
-          warn(1655, "%s not connected to net %s.", name, network_->pathName(net_));
-        return parasitics_->ensureParasiticNode(parasitic_, pin, network_);
+      const char *name1 = nameMapLookup(name);
+      if (name1) {
+        Pin *pin = findPortPinRelative(name1);
+        if (pin) {
+          if (local_only
+              && !network_->isConnected(net_, pin))
+            warn(1655, "%s not connected to net %s.", name1, network_->pathName(net_));
+          return parasitics_->ensureParasiticNode(parasitic_, pin, network_);
+        }
+        else
+          warn(1656, "pin %s not found.", name1);
       }
       else
-        warn(1656, "pin %s not found.", name);
+        warn(1657, "pin %s not found.", name);
     }
   }
   return nullptr;
@@ -622,17 +610,23 @@ SpefTriple::value(int index) const
     return values_[0];
 }
 
-} // namespace
-
 ////////////////////////////////////////////////////////////////
-// Global namespace
 
-void spefFlushBuffer();
-
-int
-SpefParse_error(const char *msg)
+SpefScanner::SpefScanner(std::istream *stream,
+                         const string &filename,
+                         SpefReader *reader,
+                         Report *report) :
+  yyFlexLexer(stream),
+  filename_(filename),
+  reader_(reader),
+  report_(report)
 {
-  spefFlushBuffer();
-  sta::spef_reader->warn(1657, "%s.", msg);
-  return 0;
 }
+
+void
+SpefScanner::error(const char *msg)
+{
+  report_->fileError(1867, filename_.c_str(), lineno(), "%s", msg);
+}
+
+} // namespace

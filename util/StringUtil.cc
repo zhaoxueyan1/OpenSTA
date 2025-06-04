@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,17 +13,31 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "StringUtil.hh"
 
 #include <limits>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib> // exit
+#include <array>
+#include <algorithm>
 
 #include "Machine.hh"
 #include "Mutex.hh"
 
 namespace sta {
+
+using std::max;
+using std::string;
 
 static void
 stringPrintTmp(const char *fmt,
@@ -73,6 +87,20 @@ stringPrint(string &str,
   stringPrintTmp(fmt, args, tmp, tmp_length);
   va_end(args);
   str = tmp;
+}
+
+void
+stringAppend(string &str,
+             const char *fmt,
+             ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  char *tmp;
+  size_t tmp_length;
+  stringPrintTmp(fmt, args, tmp, tmp_length);
+  va_end(args);
+  str += tmp;
 }
 
 string
@@ -152,70 +180,53 @@ stringPrintTmp(const char *fmt,
 
 ////////////////////////////////////////////////////////////////
 
-static int tmp_string_count_ = 100;
-static char **tmp_strings_ = nullptr;
-static size_t *tmp_string_lengths_ = nullptr;
-static int tmp_string_next_;
-static std::mutex string_lock_;
-
-void
-initTmpStrings()
-{
-  size_t initial_length = 100;
-
-  tmp_strings_ = new char*[tmp_string_count_];
-  tmp_string_lengths_ = new size_t[tmp_string_count_];
-  for (int i = 0; i < tmp_string_count_; i++) {
-    tmp_strings_[i] = new char[initial_length];
-    tmp_string_lengths_[i] = initial_length;
-  }
-  tmp_string_next_ = 0;
-}
-
-void
-deleteTmpStrings()
-{
-  if (tmp_strings_) {
-    for (int i = 0; i < tmp_string_count_; i++)
-      delete [] tmp_strings_[i];
-    delete [] tmp_strings_;
-    tmp_strings_ = nullptr;
-
-    delete [] tmp_string_lengths_;
-    tmp_string_lengths_ = nullptr;
-  }
-}
+static constexpr size_t tmp_string_count = 256;
+static constexpr size_t tmp_string_initial_length = 256;
+thread_local static std::array<char*, tmp_string_count> tmp_strings;
+thread_local static std::array<size_t, tmp_string_count> tmp_string_lengths;
+thread_local static int tmp_string_next = 0;
 
 static void
 getTmpString(// Return values.
 	     char *&str,
 	     size_t &length)
 {
-  LockGuard lock(string_lock_);
-  if (tmp_string_next_ == tmp_string_count_)
-    tmp_string_next_ = 0;
-  str = tmp_strings_[tmp_string_next_];
-  length = tmp_string_lengths_[tmp_string_next_];
-  tmp_string_next_++;
+  if (tmp_string_next == tmp_string_count)
+    tmp_string_next = 0;
+  str = tmp_strings[tmp_string_next];
+  length = tmp_string_lengths[tmp_string_next];
+  if (str == nullptr) {
+    str = tmp_strings[tmp_string_next] = new char[tmp_string_initial_length];
+    length = tmp_string_lengths[tmp_string_next] = tmp_string_initial_length;
+  }
+  tmp_string_next++;
 }
 
 char *
 makeTmpString(size_t length)
 {
-  LockGuard lock(string_lock_);
-  if (tmp_string_next_ == tmp_string_count_)
-    tmp_string_next_ = 0;
-  char *tmp_str = tmp_strings_[tmp_string_next_];
-  size_t tmp_length = tmp_string_lengths_[tmp_string_next_];
+  if (tmp_string_next == tmp_string_count)
+    tmp_string_next = 0;
+  char *tmp_str = tmp_strings[tmp_string_next];
+  size_t tmp_length = tmp_string_lengths[tmp_string_next];
   if (tmp_length < length) {
     // String isn't long enough.  Make a new one.
     delete [] tmp_str;
-    tmp_str = new char[length];
-    tmp_strings_[tmp_string_next_] = tmp_str;
-    tmp_string_lengths_[tmp_string_next_] = length;
+    tmp_length = max(tmp_string_initial_length, length);
+    tmp_str = new char[tmp_length];
+    tmp_strings[tmp_string_next] = tmp_str;
+    tmp_string_lengths[tmp_string_next] = tmp_length;
   }
-  tmp_string_next_++;
+  tmp_string_next++;
   return tmp_str;
+}
+
+char *
+makeTmpString(string &str)
+{
+  char *tmp = makeTmpString(str.length() + 1);
+  strcpy(tmp, str.c_str());
+  return tmp;
 }
 
 void
@@ -230,9 +241,9 @@ stringDeleteCheck(const char *str)
 bool
 isTmpString(const char *str)
 {
-  if (tmp_strings_) {
-    for (int i = 0; i < tmp_string_count_; i++) {
-      if (str == tmp_strings_[i])
+  if (!tmp_strings.empty()) {
+    for (size_t i = 0; i < tmp_string_count; i++) {
+      if (str == tmp_strings[i])
         return true;
     }
   }

@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,11 +13,20 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "EstimateParasitics.hh"
 
 #include "Wireload.hh"
 #include "Liberty.hh"
+#include "PortDirection.hh"
 #include "Network.hh"
 #include "Sdc.hh"
 #include "Parasitics.hh"
@@ -147,7 +156,7 @@ EstimateParasitics::estimatePiElmoreBalanced(const Pin *drvr_pin,
 					     bool &elmore_use_load_cap)
 {
   if (wireload_res == 0.0
-      || fanout == 0) {
+      || fanout == 0.0) {
     // No resistance, so load is capacitance only.
     c2 = wireload_cap + net_pin_cap;
     rpi = 0.0;
@@ -168,22 +177,19 @@ EstimateParasitics::estimatePiElmoreBalanced(const Pin *drvr_pin,
       network_->connectedPinIterator(drvr_pin);
     while (load_iter->hasNext()) {
       const Pin *load_pin = load_iter->next();
+      Port *port = network_->port(load_pin);
+      double cap = 0.0;
       // Bidirects don't count themselves as loads.
-      if (load_pin != drvr_pin && network_->isLoad(load_pin)) {
-	Port *port = network_->port(load_pin);
-	double load_cap = 0.0;
-	if (network_->isLeaf(load_pin))
-	  load_cap = sdc_->pinCapacitance(load_pin, rf, corner, min_max);
-	else if (network_->isTopLevelPort(load_pin))
-	  load_cap = sdc_->portExtCap(port, rf, corner, min_max);
-	else
-	  report_->critical(1050, "load pin not leaf or top level");
-	double cap = load_cap + cap_fanout;
-	double y2_ = res_fanout * cap * cap;
-	y1 += cap;
-	y2 += -y2_;
-	y3 += y2_ * res_fanout * cap;
-      }
+      if (load_pin == drvr_pin)
+        cap = sdc_->portExtCap(port, rf, corner, min_max);
+      else if (network_->isLeaf(load_pin))
+        cap = sdc_->pinCapacitance(load_pin, rf, corner, min_max) + cap_fanout;
+      else if (network_->isTopLevelPort(load_pin))
+        cap = sdc_->portExtCap(port, rf, corner, min_max) + cap_fanout;
+      double y2_ = res_fanout * cap * cap;
+      y1 += cap;
+      y2 += -y2_;
+      y3 += y2_ * res_fanout * cap;
     }
     delete load_iter;
 
@@ -196,6 +202,8 @@ EstimateParasitics::estimatePiElmoreBalanced(const Pin *drvr_pin,
     else {
       c1 = static_cast<float>(y2 * y2 / y3);
       c2 = static_cast<float>(y1 - y2 * y2 / y3);
+      if (c2 < 0.0)
+        c2 = 0.0;
       rpi = static_cast<float>(-y3 * y3 / (y2 * y2 * y2));
     }
     elmore_res = static_cast<float>(res_fanout);

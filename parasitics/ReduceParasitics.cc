@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "ReduceParasitics.hh"
 
@@ -155,60 +163,53 @@ ReduceToPi::reducePiDfs(const Pin *drvr_pin,
 			double &dwn_cap,
                         double &max_resistance)
 {
-  if (parasitics_->isExternal(node)) {
-    y1 = y2 = y3 = 0.0;
-    max_resistance = 0.0;
-    dwn_cap = 0.0;
-  }
-  else {
-    double coupling_cap = 0.0;
-    ParasiticCapacitorSeq &capacitors = capacitor_map_[node];
-    for (ParasiticCapacitor *capacitor : capacitors)
-      coupling_cap += parasitics_->value(capacitor);
+  double coupling_cap = 0.0;
+  ParasiticCapacitorSeq &capacitors = capacitor_map_[node];
+  for (ParasiticCapacitor *capacitor : capacitors)
+    coupling_cap += parasitics_->value(capacitor);
 
-    dwn_cap = parasitics_->nodeGndCap(node)
-      + coupling_cap * coupling_cap_multiplier_
-      + pinCapacitance(node);
-    y1 = dwn_cap;
-    y2 = y3 = 0.0;
-    max_resistance = max(max_resistance, src_resistance);
+  dwn_cap = parasitics_->nodeGndCap(node)
+    + coupling_cap * coupling_cap_multiplier_
+    + pinCapacitance(node);
+  y1 = dwn_cap;
+  y2 = y3 = 0.0;
+  max_resistance = max(max_resistance, src_resistance);
 
-    visit(node);
-    ParasiticResistorSeq &resistors = resistor_map_[node];
-    for (ParasiticResistor *resistor : resistors) {
-      if (!isLoopResistor(resistor)) {
-        ParasiticNode *onode = parasitics_->otherNode(resistor, node);
-        // One commercial extractor creates resistors with identical from/to nodes.
-        if (onode != node
-            && resistor != from_res) {
-          if (isVisited(onode)) {
-            // Resistor loop.
-            debugPrint(debug_, "parasitic_reduce", 2, " loop detected thru resistor %lu",
-                       parasitics_->id(resistor));
-            markLoopResistor(resistor);
-          }
-          else {
-            double r = parasitics_->value(resistor);
-            double yd1, yd2, yd3, dcap;
-            reducePiDfs(drvr_pin, onode, resistor, src_resistance + r,
-                        yd1, yd2, yd3, dcap, max_resistance);
-            // Rule 3.  Upstream traversal of a series resistor.
-            // Rule 4.  Parallel admittances add.
-            y1 += yd1;
-            y2 += yd2 - r * yd1 * yd1;
-            y3 += yd3 - 2 * r * yd1 * yd2 + r * r * yd1 * yd1 * yd1;
-            dwn_cap += dcap;
-          }
+  visit(node);
+  ParasiticResistorSeq &resistors = resistor_map_[node];
+  for (ParasiticResistor *resistor : resistors) {
+    if (!isLoopResistor(resistor)) {
+      ParasiticNode *onode = parasitics_->otherNode(resistor, node);
+      // One commercial extractor creates resistors with identical from/to nodes.
+      if (onode != node
+          && resistor != from_res) {
+        if (isVisited(onode)) {
+          // Resistor loop.
+          debugPrint(debug_, "parasitic_reduce", 2, " loop detected thru resistor %zu",
+                     parasitics_->id(resistor));
+          markLoopResistor(resistor);
+        }
+        else {
+          double r = parasitics_->value(resistor);
+          double yd1, yd2, yd3, dcap;
+          reducePiDfs(drvr_pin, onode, resistor, src_resistance + r,
+                      yd1, yd2, yd3, dcap, max_resistance);
+          // Rule 3.  Upstream traversal of a series resistor.
+          // Rule 4.  Parallel admittances add.
+          y1 += yd1;
+          y2 += yd2 - r * yd1 * yd1;
+          y3 += yd3 - 2 * r * yd1 * yd2 + r * r * yd1 * yd1 * yd1;
+          dwn_cap += dcap;
         }
       }
     }
-
-    setDownstreamCap(node, dwn_cap);
-    leave(node);
-    debugPrint(debug_, "parasitic_reduce", 3,
-               " node %s y1=%.3g y2=%.3g y3=%.3g cap=%.3g",
-               parasitics_->name(node), y1, y2, y3, dwn_cap);
   }
+
+  setDownstreamCap(node, dwn_cap);
+  leave(node);
+  debugPrint(debug_, "parasitic_reduce", 3,
+             " node %s y1=%.3g y2=%.3g y3=%.3g cap=%.3g",
+             parasitics_->name(node), y1, y2, y3, dwn_cap);
 }
 
 float
@@ -311,8 +312,8 @@ reduceToPiElmore(const Parasitic *parasitic_network,
   if (drvr_node) {
     debugPrint(sta->debug(), "parasitic_reduce", 1, "Reduce driver %s %s %s",
                sta->network()->pathName(drvr_pin),
-               rf->asString(),
-               min_max->asString());
+               rf->to_string().c_str(),
+               min_max->to_string().c_str());
     ReduceToPiElmore reducer(sta);
     return reducer.makePiElmore(parasitic_network, drvr_pin, drvr_node,
                                 coupling_cap_factor, rf, corner,

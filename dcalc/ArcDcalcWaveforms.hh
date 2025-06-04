@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -22,37 +30,25 @@
 
 namespace sta {
 
+class StaState;
 class Corner;
 class DcalcAnalysisPt;
+class ArcDcalcArg;
 
-// Abstract class for the graph delay calculator traversal to interface
+// Abstract class for delay calculation waveforms for ploting.
 class ArcDcalcWaveforms
 {
 public:
-  virtual Table1 inputWaveform(const Pin *in_pin,
-                               const RiseFall *in_rf,
-                               const Corner *corner,
-                               const MinMax *min_max);
-  virtual Table1 drvrWaveform(const Pin *in_pin,
-                              const RiseFall *in_rf,
-                              const Pin *drvr_pin,
-                              const RiseFall *drvr_rf,
-                              const Corner *corner,
-                              const MinMax *min_max) = 0;
-  virtual Table1 loadWaveform(const Pin *in_pin,
-                              const RiseFall *in_rf,
-                              const Pin *drvr_pin,
-                              const RiseFall *drvr_rf,
-                              const Pin *load_pin,
-                              const Corner *corner,
-                              const MinMax *min_max) = 0;
-  virtual Table1 drvrRampWaveform(const Pin *in_pin,
-                                  const RiseFall *in_rf,
-                                  const Pin *drvr_pin,
-                                  const RiseFall *drvr_rf,
-                                  const Pin *load_pin,
-                                  const Corner *corner,
-                                  const MinMax *min_max);
+  // Record waveform for drvr/load pin.
+  virtual void watchPin(const Pin *pin) = 0;
+  virtual void clearWatchPins() = 0;
+  virtual PinSeq watchPins() const = 0;
+  virtual Waveform watchWaveform(const Pin *pin) = 0;
+
+protected:
+  Waveform inputWaveform(ArcDcalcArg &dcalc_arg,
+                         const DcalcAnalysisPt *dcalc_ap,
+                         const StaState *sta);
 };
 
 } // namespace

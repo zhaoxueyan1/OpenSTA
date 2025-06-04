@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,12 +13,23 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
+
+#include <stack>
 
 #include "NetworkClass.hh"
 #include "SdcClass.hh"
 #include "GraphClass.hh"
+#include "SearchPred.hh"
 #include "StaState.hh"
 
 namespace sta {
@@ -26,10 +37,13 @@ namespace sta {
 class SearchPred;
 class LevelizeObserver;
 
+typedef std::pair<Vertex*,VertexOutEdgeIterator*> VertexEdgeIterPair;
+typedef std::stack<VertexEdgeIterPair> FindBackEdgesStack;
+
 class Levelize : public StaState
 {
 public:
-  explicit Levelize(StaState *sta);
+  Levelize(StaState *sta);
   virtual ~Levelize();
   // Space between initially assigned levels that is filled in by
   // incremental levelization.  Set level space before levelization.
@@ -46,40 +60,56 @@ public:
   // Vertices with no fanin edges.
   VertexSet *roots() { return roots_; }
   bool isRoot(Vertex *vertex);
+  bool hasFanout(Vertex *vertex);
   // Reset to virgin state.
   void clear();
   // Edge is disabled to break combinational loops.
   bool isDisabledLoop(Edge *edge) const;
   // Only valid when levels are valid.
-  GraphLoopSeq *loops() { return loops_; }
+  GraphLoopSeq &loops() { return loops_; }
   // Set the observer for level changes.
   void setObserver(LevelizeObserver *observer);
 
 protected:
   void levelize();
   void findRoots();
-  void sortRoots(VertexSeq &roots);
-  void levelizeFrom(VertexSeq &roots);
-  void visit(Vertex *vertex, Level level, Level level_space, EdgeSeq &path);
-  void levelizeCycles();
-  void relevelize();
-  void clearLoopEdges();
-  void deleteLoops();
-  void recordLoop(Edge *edge, EdgeSeq &path);
-  EdgeSeq *loopEdges(EdgeSeq &path, Edge *closing_edge);
+  VertexSeq sortedRootsWithFanout();
+  VertexSeq findTopologicalOrder();
+  void assignLevels(VertexSeq &topo_sorted);
+  void recordLoop(Edge *edge,
+                  EdgeSeq &path);
+  EdgeSeq *loopEdges(EdgeSeq &path,
+                     Edge *closing_edge);
   void ensureLatchLevels();
+  void findBackEdges();
+  EdgeSet findBackEdges(EdgeSeq &path,
+                        FindBackEdgesStack &stack);
+  void findCycleBackEdges();
+  VertexSeq findUnvisitedVertices();
+  void relevelize();
+  void visit(Vertex *vertex,
+             Edge *from,
+             Level level,
+             Level level_space,
+             VertexSet &visited,
+             VertexSet &path_vertices,
+             EdgeSeq &path);
   void setLevel(Vertex  *vertex,
 		Level level);
+  void setLevelIncr(Vertex  *vertex,
+                    Level level);
+  void clearLoopEdges();
+  void deleteLoops();
   void reportPath(EdgeSeq &path) const;
 
-  SearchPred *search_pred_;
+  SearchPredNonLatch2 search_pred_;
   bool levelized_;
   bool levels_valid_;
   Level max_level_;
   Level level_space_;
   VertexSet *roots_;
   VertexSet *relevelize_from_;
-  GraphLoopSeq *loops_;
+  GraphLoopSeq loops_;
   EdgeSet loop_edges_;
   EdgeSet disabled_loop_edges_;
   EdgeSet latch_d_to_q_edges_;
@@ -96,9 +126,7 @@ public:
   ~GraphLoop();
   EdgeSeq *edges() { return edges_; }
   bool isCombinational() const;
-  void report(Report *report,
-	      Network *network,
-	      Graph *graph) const;
+  void report(const StaState *sta) const;
 
 private:
   EdgeSeq *edges_;
@@ -109,6 +137,7 @@ class LevelizeObserver
 public:
   LevelizeObserver() {}
   virtual ~LevelizeObserver() {}
+  virtual void levelsChangedBefore() = 0;
   virtual void levelChangedBefore(Vertex *vertex) = 0;
 };
 

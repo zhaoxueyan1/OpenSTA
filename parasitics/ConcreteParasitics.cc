@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "ConcreteParasitics.hh"
 
@@ -246,10 +254,8 @@ ConcretePiElmore::unannotatedLoads(const Pin *drvr_pin,
                                    const Parasitics *parasitics) const
 {
   PinSet loads = parasitics->loads(drvr_pin);
-  for (auto pin_elmore : loads_) {
-    const Pin *load = pin_elmore.first;
+  for (const auto [load, elmore] : loads_)
     loads.erase(load);
-  }
   return loads;
 }
 
@@ -371,10 +377,8 @@ ConcretePiPoleResidue::unannotatedLoads(const Pin *drvr_pin,
                                         const Parasitics *parasitics) const
 {
   PinSet loads = parasitics->loads(drvr_pin);
-  for (auto pin_pole_residue : load_pole_residue_) {
-    const Pin *load = pin_pole_residue.first;
+  for (const auto& [load, pole_residue] : load_pole_residue_)
     loads.erase(load);
-  }
   return loads;
 }
 
@@ -395,6 +399,7 @@ ConcreteParasiticNode::ConcreteParasiticNode(const Pin *pin,
                                              bool is_external) :
   is_net_(false),
   is_external_(is_external),
+  id_(0),
   cap_(0.0)
 {
   net_pin_.pin_ = pin;
@@ -506,14 +511,10 @@ ConcreteParasiticNetwork::~ConcreteParasiticNetwork()
 void
 ConcreteParasiticNetwork::deleteNodes()
 {
-  for (auto id_node : sub_nodes_) {
-    ConcreteParasiticNode *node = id_node.second;
+  for (const auto& [id, node] : sub_nodes_)
     delete node;
-  }
-  for (auto pin_node : pin_nodes_) {
-    ConcreteParasiticNode *node = pin_node.second;
+  for (const auto& [pin, node] : pin_nodes_)
     delete node;
-  }
 }
 
 void
@@ -547,14 +548,10 @@ ParasiticNodeSeq
 ConcreteParasiticNetwork::nodes() const
 {
   ParasiticNodeSeq nodes;
-  for (auto pin_node : pin_nodes_) {
-    ParasiticNode *node = pin_node.second;
+  for (const auto [pin, node] : pin_nodes_)
     nodes.push_back(node);
-  }
-  for (auto id_node : sub_nodes_) {
-    ParasiticNode *node = id_node.second;
+  for (const auto& [id, node] : sub_nodes_)
     nodes.push_back(node);
-  }
   return nodes;
 }
 
@@ -562,14 +559,12 @@ float
 ConcreteParasiticNetwork::capacitance() const
 {
   float cap = 0.0;
-  for (auto id_node : sub_nodes_) {
-    ConcreteParasiticNode *node = id_node.second;
+  for (const auto& [id, node] : sub_nodes_) {
     if (!node->isExternal())
       cap += node->capacitance();
   }
 
-  for (auto pin_node : pin_nodes_) {
-    ConcreteParasiticNode *node = pin_node.second;
+  for (const auto [pin, node] : pin_nodes_) {
     if (!node->isExternal())
       cap += node->capacitance();
   }
@@ -609,15 +604,17 @@ ConcreteParasiticNetwork::findParasiticNode(const Pin *pin) const
 ConcreteParasiticNode *
 ConcreteParasiticNetwork::ensureParasiticNode(const Net *net,
 					      int id,
-                                              const Network *)
+                                              const Network *network)
 {
   ConcreteParasiticNode *node;
   NetIdPair net_id(net, id);
   auto id_node = sub_nodes_.find(net_id);
   if (id_node == sub_nodes_.end()) {
-    node = new ConcreteParasiticNode(net, id, net != net_);
+    Net *net1 = network->highestNetAbove(const_cast<Net*>(net));
+    node = new ConcreteParasiticNode(net, id, network->highestNetAbove(net1) != net_);
     sub_nodes_[net_id] = node;
-    max_node_id_ = max((int) max_node_id_, id);
+    if (net == net_)
+      max_node_id_ = max((int) max_node_id_, id);
   }
   else
     node = id_node->second;
@@ -790,8 +787,7 @@ ConcreteParasitics::deleteParasitics()
 {
   int ap_count = corners_->parasiticAnalysisPtCount();
   int ap_rf_count = ap_count * RiseFall::index_count;
-  for (auto drvr_parasitics : drvr_parasitic_map_) {
-    ConcreteParasitic **parasitics = drvr_parasitics.second;
+  for (const auto [drvr, parasitics] : drvr_parasitic_map_) {
     if (parasitics) {
       for (int i = 0; i < ap_rf_count; i++)
 	delete parasitics[i];
@@ -800,8 +796,7 @@ ConcreteParasitics::deleteParasitics()
   }
   drvr_parasitic_map_.clear();
 
-  for (auto net_parasitics : parasitic_network_map_) {
-    ConcreteParasiticNetwork **parasitics = net_parasitics.second;
+  for (const auto [net, parasitics] : parasitic_network_map_) {
     if (parasitics) {
       for (int i = 0; i < ap_count; i++)
 	delete parasitics[i];
@@ -817,8 +812,8 @@ ConcreteParasitics::deleteParasitics(const Pin *drvr_pin,
 {
   ConcreteParasitic **parasitics = drvr_parasitic_map_[drvr_pin];
   if (parasitics) {
-    for (auto tr : RiseFall::range()) {
-      int ap_rf_index = parasiticAnalysisPtIndex(ap, tr);
+    for (auto rf : RiseFall::range()) {
+      int ap_rf_index = parasiticAnalysisPtIndex(ap, rf);
       delete parasitics[ap_rf_index];
       parasitics[ap_rf_index] = nullptr;
     }
@@ -959,9 +954,9 @@ ConcreteParasitics::findPiElmore(const Pin *drvr_pin,
 				 const RiseFall *rf,
 				 const ParasiticAnalysisPt *ap) const
 {
+  LockGuard lock(lock_);
   if (!drvr_parasitic_map_.empty()) {
     int ap_rf_index = parasiticAnalysisPtIndex(ap, rf);
-    LockGuard lock(lock_);
     ConcreteParasitic **parasitics = drvr_parasitic_map_.findKey(drvr_pin);
     if (parasitics) {
       ConcreteParasitic *parasitic = parasitics[ap_rf_index];
@@ -1247,8 +1242,10 @@ ConcreteParasitics::makeParasiticNetwork(const Net *net,
   ConcreteParasiticNetwork *parasitic = parasitics[ap_index];
   if (parasitic) {
     delete parasitic;
-    for (const Pin *drvr_pin : *network_->drivers(net))
-      deleteParasitics(drvr_pin, ap);
+    if (net) {
+      for (const Pin *drvr_pin : *network_->drivers(net))
+        deleteParasitics(drvr_pin, ap);
+    }
   }
   parasitic = new ConcreteParasiticNetwork(net, includes_pin_caps, network_);
   parasitics[ap_index] = parasitic;
@@ -1297,6 +1294,17 @@ ConcreteParasitics::deleteParasiticNetworks(const Net *net)
       parasitic_network_map_.erase(net);
     }
   }
+}
+
+const Net *
+ConcreteParasitics::net(const Parasitic *parasitic) const
+{
+  const ConcreteParasiticNetwork *cparasitic =
+    static_cast<const ConcreteParasiticNetwork*>(parasitic);
+  if (cparasitic->isParasiticNetwork())
+    return cparasitic->net();
+  else
+    return nullptr;
 }
 
 bool
@@ -1444,6 +1452,14 @@ ConcreteParasitics::net(const ParasiticNode *node,
   const ConcreteParasiticNode *cnode =
     static_cast<const ConcreteParasiticNode*>(node);
   return cnode->net(network);
+}
+
+unsigned
+ConcreteParasitics::netId(const ParasiticNode *node) const
+{
+  const ConcreteParasiticNode *cnode =
+    static_cast<const ConcreteParasiticNode*>(node);
+  return cnode->id();
 }
 
 bool

@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -24,8 +32,6 @@
 #include "Vector.hh"
 
 namespace sta {
-
-using std::string;
 
 inline bool
 stringEq(const char *str1,
@@ -159,16 +165,21 @@ isDigits(const char *str);
 char *
 stringPrint(const char *fmt,
 	    ...) __attribute__((format (printf, 1, 2)));
-string
+std::string
 stdstrPrint(const char *fmt,
 	       ...) __attribute__((format (printf, 1, 2)));
 char *
 stringPrintArgs(const char *fmt,
 		va_list args);
 void
-stringPrint(string &str,
+stringPrint(std::string &str,
 	    const char *fmt,
 	    ...) __attribute__((format (printf, 2, 3)));
+// Formated append to std::string.
+void
+stringAppend(std::string &str,
+             const char *fmt,
+             ...) __attribute__((format (printf, 2, 3)));
 
 // Print to a temporary string.
 char *
@@ -177,10 +188,8 @@ stringPrintTmp(const char *fmt,
 
 char *
 makeTmpString(size_t length);
-void
-initTmpStrings();
-void
-deleteTmpStrings();
+char *
+makeTmpString(std::string &str);
 bool
 isTmpString(const char *str);
 
@@ -188,13 +197,13 @@ isTmpString(const char *str);
 
 // Trim right spaces.
 void
-trimRight(string &str);
+trimRight(std::string &str);
 
-typedef Vector<string> StringVector;
+typedef Vector<std::string> StringVector;
 
 void
-split(const string &text,
-      const string &delims,
+split(const std::string &text,
+      const std::string &delims,
       // Return values.
       StringVector &tokens);
 

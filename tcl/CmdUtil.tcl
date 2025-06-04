@@ -1,5 +1,5 @@
 # OpenSTA, Static Timing Analyzer
-# Copyright (c) 2024, Parallax Software, Inc.
+# Copyright (c) 2025, Parallax Software, Inc.
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
+# 
+# The origin of this software must not be misrepresented; you must not
+# claim that you wrote the original software.
+# 
+# Altered source versions must be plainly marked as such, and must not be
+# misrepresented as being the original software.
+# 
+# This notice may not be removed or altered from any source distribution.
 
 namespace eval sta {
 
@@ -118,6 +126,17 @@ proc report_units { args } {
   }
 }
 
+proc write_units_json { jsonfile } {
+  set f [open $jsonfile w]
+  puts $f "{"
+  foreach unit {"time" "capacitance" "resistance" "voltage" "current" "power"} {
+    puts $f "  \"$unit\": \"[unit_scaled_suffix $unit]\","
+  }
+  puts $f "  \"distance\": \"[unit_scaled_suffix distance]\""
+  puts $f "}"
+  close $f
+}
+
 ################################################################
 
 define_cmd_args "set_cmd_units" \
@@ -156,10 +175,10 @@ proc set_unit_values { unit key suffix key_var } {
         set scale [unit_prefix_scale $unit $prefix ]
         set_cmd_unit_scale $unit $scale
       } else {
-        sta_error 343 "unknown unit $unit prefix '${arg_prefix}'."
+        sta_error 166 "unknown unit $unit prefix '${arg_prefix}'."
       }
     } else {
-      sta_error 501 "incorrect unit suffix '$arg_suffix'."
+      sta_error 167 "incorrect unit suffix '$arg_suffix'."
     }
     if [info exists keys(-digits)] {
       set_cmd_unit_digits $unit $keys(-digits)

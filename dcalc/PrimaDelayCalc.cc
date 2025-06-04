@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "PrimaDelayCalc.hh"
 
@@ -37,6 +45,7 @@
 
 namespace sta {
 
+using std::string;
 using std::abs;
 using std::make_shared;
 using Eigen::SparseLU;
@@ -57,6 +66,7 @@ PrimaDelayCalc::PrimaDelayCalc(StaState *sta) :
   dcalc_args_(nullptr),
   load_pin_index_map_(nullptr),
   pin_node_map_(network_),
+  node_index_map_(ParasiticNodeLess(parasitics_, network_)),
   prima_order_(3),
   make_waveforms_(false),
   waveform_drvr_pin_(nullptr),
@@ -71,6 +81,7 @@ PrimaDelayCalc::PrimaDelayCalc(const PrimaDelayCalc &dcalc) :
   dcalc_args_(nullptr),
   load_pin_index_map_(nullptr),
   pin_node_map_(network_),
+  node_index_map_(ParasiticNodeLess(parasitics_, network_)),
   prima_order_(dcalc.prima_order_),
   make_waveforms_(false),
   waveform_drvr_pin_(nullptr),
@@ -184,49 +195,48 @@ PrimaDelayCalc::gateDelay(const Pin *drvr_pin,
                           const DcalcAnalysisPt *dcalc_ap)
 {
   ArcDcalcArgSeq dcalc_args;
-  dcalc_args.emplace_back(nullptr, drvr_pin, nullptr, arc, in_slew, parasitic);
-  ArcDcalcResultSeq dcalc_results = gateDelays(dcalc_args, load_cap,
-                                               load_pin_index_map, dcalc_ap);
+  dcalc_args.emplace_back(nullptr, drvr_pin, nullptr, arc, in_slew, load_cap, parasitic);
+  ArcDcalcResultSeq dcalc_results = gateDelays(dcalc_args, load_pin_index_map, dcalc_ap);
   return dcalc_results[0];
 }
 
 ArcDcalcResultSeq
 PrimaDelayCalc::gateDelays(ArcDcalcArgSeq &dcalc_args,
-                           float load_cap,
                            const LoadPinIndexMap &load_pin_index_map,
                            const DcalcAnalysisPt *dcalc_ap)
 {
   dcalc_args_ = &dcalc_args;
   load_pin_index_map_ = &load_pin_index_map;
   drvr_count_ = dcalc_args.size();
-  load_cap_ = load_cap;
   dcalc_ap_ = dcalc_ap;
   drvr_rf_ = dcalc_args[0].arc()->toEdge()->asRiseFall();
   parasitic_network_ = dcalc_args[0].parasitic();
+  load_cap_ = dcalc_args[0].loadCap();
 
   bool failed = false;
   output_waveforms_.resize(drvr_count_);
+  const DcalcAnalysisPtSeq &dcalc_aps = corners_->dcalcAnalysisPts();
   for (size_t drvr_idx = 0; drvr_idx < drvr_count_; drvr_idx++) {
     ArcDcalcArg &dcalc_arg = dcalc_args[drvr_idx];
-    GateTableModel *table_model = gateTableModel(dcalc_arg.arc(), dcalc_ap);
+    GateTableModel *table_model = dcalc_arg.arc()->gateTableModel(dcalc_ap);
     if (table_model && dcalc_arg.parasitic()) {
       OutputWaveforms *output_waveforms = table_model->outputWaveforms();
-      Slew in_slew = dcalc_arg.inSlew();
+      float in_slew = dcalc_arg.inSlewFlt();
       if (output_waveforms
           // Bounds check because extrapolating waveforms does not work for shit.
           && output_waveforms->slewAxis()->inBounds(in_slew)
-          && output_waveforms->capAxis()->inBounds(load_cap)) {
+          && output_waveforms->capAxis()->inBounds(dcalc_arg.loadCap())) {
         output_waveforms_[drvr_idx] = output_waveforms;
         debugPrint(debug_, "ccs_dcalc", 1, "%s %s",
                    dcalc_arg.drvrCell()->name(),
-                   drvr_rf_->asString());
+                   drvr_rf_->to_string().c_str());
         LibertyCell *drvr_cell = dcalc_arg.drvrCell();
         const LibertyLibrary *drvr_library = drvr_cell->libertyLibrary();
         bool vdd_exists;
         drvr_library->supplyVoltage("VDD", vdd_, vdd_exists);
         if (!vdd_exists)
           report_->error(1720, "VDD not defined in library %s", drvr_library->name());
-        drvr_cell->ensureVoltageWaveforms();
+        drvr_cell->ensureVoltageWaveforms(dcalc_aps);
         if (drvr_idx == 0) {
           vth_ = drvr_library->outputThreshold(drvr_rf_) * vdd_;
           vl_ = drvr_library->slewLowerThreshold(drvr_rf_) * vdd_;
@@ -241,7 +251,7 @@ PrimaDelayCalc::gateDelays(ArcDcalcArgSeq &dcalc_args,
   }
 
   if (failed)
-    return tableDcalcResults(load_cap);
+    return tableDcalcResults();
   else {
     simulate();
     return dcalcResults();
@@ -249,17 +259,18 @@ PrimaDelayCalc::gateDelays(ArcDcalcArgSeq &dcalc_args,
 }
 
 ArcDcalcResultSeq
-PrimaDelayCalc::tableDcalcResults(float load_cap)
+PrimaDelayCalc::tableDcalcResults()
 {
   for (size_t drvr_idx = 0; drvr_idx < drvr_count_; drvr_idx++) {
     ArcDcalcArg &dcalc_arg = (*dcalc_args_)[drvr_idx];
     const Pin *drvr_pin = dcalc_arg.drvrPin();
-    const RiseFall *rf = dcalc_arg.drvrEdge();
-    const Parasitic *parasitic = table_dcalc_->findParasitic(drvr_pin, rf, dcalc_ap_);
-    dcalc_arg.setParasitic(parasitic);
+    if (drvr_pin) {
+      const RiseFall *rf = dcalc_arg.drvrEdge();
+      const Parasitic *parasitic = table_dcalc_->findParasitic(drvr_pin, rf, dcalc_ap_);
+      dcalc_arg.setParasitic(parasitic);
+    }
   }
-  return table_dcalc_->gateDelays(*dcalc_args_, load_cap, *load_pin_index_map_,
-                                  dcalc_ap_);
+  return table_dcalc_->gateDelays(*dcalc_args_, *load_pin_index_map_, dcalc_ap_);
 }
 
 void
@@ -275,7 +286,7 @@ PrimaDelayCalc::simulate()
     simulate1(Gq_, Cq_, Bq_, xq_init_, Vq_, prima_order_);
   }
   else {
-    MatrixXd x_to_v = MatrixXd::Identity(order_, order_);
+    Eigen::MatrixXd x_to_v = Eigen::MatrixXd::Identity(order_, order_);
     simulate1(G_, C_, B_, x_init_, x_to_v, order_);
   }
 }
@@ -283,14 +294,14 @@ PrimaDelayCalc::simulate()
 void
 PrimaDelayCalc::simulate1(const MatrixSd &G,
                  const MatrixSd &C,
-                 const MatrixXd &B,
-                 const VectorXd &x_init,
-                 const MatrixXd &x_to_v,
+                 const Eigen::MatrixXd &B,
+                 const Eigen::VectorXd &x_init,
+                 const Eigen::MatrixXd &x_to_v,
                  const size_t order)
 {
-  VectorXd x(order);
-  VectorXd x_prev(order);
-  VectorXd x_prev2(order);
+  Eigen::VectorXd x(order);
+  Eigen::VectorXd x_prev(order);
+  Eigen::VectorXd x_prev2(order);
 
   v_.resize(order);
   v_prev_.resize(order);
@@ -311,7 +322,7 @@ PrimaDelayCalc::simulate1(const MatrixSd &G,
   // Initial time depends on ceff which impact delay, so use a sim step
   // to find an initial ceff.
   setPortCurrents();
-  VectorXd rhs(order);
+  Eigen::VectorXd rhs(order);
   rhs = B * u_ + (1.0 / time_step_) * C * (3.0 * x_prev - x_prev2);
   x = A_solver.solve(rhs);
   v_ = x_to_v * x;
@@ -321,7 +332,7 @@ PrimaDelayCalc::simulate1(const MatrixSd &G,
   v_ = v_prev_ = x_to_v * x_init;
 
   // voltageTime is always for a rising waveform so 0.0v is initial voltage.
-  double time_begin = output_waveforms_[0]->voltageTime((*dcalc_args_)[0].inSlew(),
+  double time_begin = output_waveforms_[0]->voltageTime((*dcalc_args_)[0].inSlewFlt(),
                                                         ceff_[0], 0.0);
   // Limit in case load voltage waveforms don't get to final value.
   double time_end = time_begin + maxTime();
@@ -368,7 +379,7 @@ PrimaDelayCalc::timeStep()
 double
 PrimaDelayCalc::maxTime()
 {
-  return (*dcalc_args_)[0].inSlew()
+  return (*dcalc_args_)[0].inSlewFlt()
     + (driverResistance() + resistance_sum_) * load_cap_ * 4;
 }
 
@@ -484,7 +495,7 @@ PrimaDelayCalc::initCeffIdrvr()
     ceff_[drvr_idx] = load_cap_;
     // voltageTime is always for a rising waveform so 0.0v is initial voltage.
     drvr_current_[drvr_idx] =
-      output_waveforms_[drvr_idx]->voltageCurrent(dcalc_arg.inSlew(),
+      output_waveforms_[drvr_idx]->voltageCurrent(dcalc_arg.inSlewFlt(),
                                                   ceff_[drvr_idx], 0.0);
   }
 }
@@ -615,7 +626,7 @@ PrimaDelayCalc::updateCeffIdrvr()
         drvr_current_[drvr_idx] = 0.0;
       else
         drvr_current_[drvr_idx] =
-          output_waveforms_[drvr_idx]->voltageCurrent(dcalc_arg.inSlew(),
+          output_waveforms_[drvr_idx]->voltageCurrent(dcalc_arg.inSlewFlt(),
                                                       ceff_[drvr_idx], v1);
     }
     else {
@@ -631,7 +642,7 @@ PrimaDelayCalc::updateCeffIdrvr()
       }
       else
         drvr_current_[drvr_idx] =
-          output_waveforms_[drvr_idx]->voltageCurrent(dcalc_arg.inSlew(),
+          output_waveforms_[drvr_idx]->voltageCurrent(dcalc_arg.inSlewFlt(),
                                                       ceff_[drvr_idx],
                                                       vdd_ - v1);
     }
@@ -708,7 +719,7 @@ PrimaDelayCalc::dcalcResults()
     const LibertyLibrary *drvr_library = dcalc_arg.drvrLibrary();
     size_t drvr_node = pin_node_map_[drvr_pin];
     ThresholdTimes &drvr_times = threshold_times_[drvr_node];
-    float ref_time = output_waveforms_[drvr_idx]->referenceTime(dcalc_arg.inSlew());
+    float ref_time = output_waveforms_[drvr_idx]->referenceTime(dcalc_arg.inSlewFlt());
     ArcDelay gate_delay = drvr_times[threshold_vth] - ref_time;
     Slew drvr_slew = abs(drvr_times[threshold_vh] - drvr_times[threshold_vl]);
     dcalc_result.setGateDelay(gate_delay);
@@ -731,7 +742,7 @@ PrimaDelayCalc::dcalcResults()
       debugPrint(debug_, "ccs_dcalc", 2,
                  "load %s %s delay %s slew %s",
                  network_->pathName(load_pin),
-                 drvr_rf_->asString(),
+                 drvr_rf_->to_string().c_str(),
                  delayAsString(wire_delay, this),
                  delayAsString(load_slew, this));
 
@@ -761,12 +772,12 @@ PrimaDelayCalc::primaReduce()
   SparseLU<MatrixSd> G_solver(G_);
   if (G_solver.info() != Eigen::Success)
     report_->error(1752, "G matrix is singular.");
-  MatrixXd R(order_, port_count_);
+  Eigen::MatrixXd R(order_, port_count_);
   R = G_solver.solve(B_);
 
   // Step 4
-  HouseholderQR<MatrixXd> R_solver(R);
-  MatrixXd Q = R_solver.householderQ();
+  Eigen::HouseholderQR<Eigen::MatrixXd> R_solver(R);
+  Eigen::MatrixXd Q = R_solver.householderQ();
 
   // Vq is "X" in the prima paper (too many "x" variables in the paper).
   Vq_.resize(order_, prima_order_);
@@ -775,7 +786,7 @@ PrimaDelayCalc::primaReduce()
 
   // Step 6 - Arnolid iteration
   for (size_t k = 1; k < prima_order_; k++) {
-    VectorXd V = C_ * Vq_.col(k - 1);
+    Eigen::VectorXd V = C_ * Vq_.col(k - 1);
     Vq_.col(k) = G_solver.solve(V);
 
     // Modified Gram-Schmidt orthonormalization
@@ -783,9 +794,9 @@ PrimaDelayCalc::primaReduce()
       double H = Vq_.col(j).transpose() * Vq_.col(k);
       Vq_.col(k) = Vq_.col(k) - H * Vq_.col(j);
     }
-    VectorXd Vq_k = Vq_.col(k);
-    HouseholderQR<MatrixXd> Vq_k_solver(Vq_k);
-    MatrixXd VqQ = Vq_k_solver.householderQ();
+    Eigen::VectorXd Vq_k = Vq_.col(k);
+    Eigen::HouseholderQR<Eigen::MatrixXd> Vq_k_solver(Vq_k);
+    Eigen::MatrixXd VqQ = Vq_k_solver.householderQ();
     Vq_.col(k) = VqQ.col(0);
   }
 
@@ -814,36 +825,36 @@ PrimaDelayCalc::primaReduce2()
 {
   G_.makeCompressed();
   // Step 3: solve G*R = B for R
-  SparseLU<MatrixSd> G_solver(G_);
-  MatrixXd R(order_, port_count_);
+  Eigen::SparseLU<MatrixSd> G_solver(G_);
+  Eigen::MatrixXd R(order_, port_count_);
   R = G_solver.solve(B_);
 
   // Step 4
-  HouseholderQR<MatrixXd> R_solver(R);
-  MatrixXd Q = R_solver.householderQ();
+  Eigen::HouseholderQR<Eigen::MatrixXd> R_solver(R);
+  Eigen::MatrixXd Q = R_solver.householderQ();
 
   // Vq is "X" in the prima paper (too many "x" variables in the paper).
   size_t n = ceil(prima_order_ / static_cast<double>(port_count_));
-  MatrixXd Vq(order_, n * port_count_);
+  Eigen::MatrixXd Vq(order_, n * port_count_);
   // // Vq = first port_count columns of Q.
   Vq.block(0, 0, order_, port_count_) = Q.block(0, 0, order_, port_count_);
 
   // Step 6 - Arnolid iteration
   for (size_t k = 1; k < n; k++) {
-    MatrixXd V = C_ * Vq.block(0, (k - 1) * port_count_, order_, port_count_);
-    MatrixXd GV = G_solver.solve(V);
+    Eigen::MatrixXd V = C_ * Vq.block(0, (k - 1) * port_count_, order_, port_count_);
+    Eigen::MatrixXd GV = G_solver.solve(V);
     Vq.block(0, k * port_count_, order_, port_count_) = GV;
 
     // Modified Gram-Schmidt orthonormalization
     for (size_t j = 0; j < k; j++) {
-      MatrixXd H = Vq.block(0, j * port_count_, order_, port_count_).transpose()
+      Eigen::MatrixXd H = Vq.block(0, j * port_count_, order_, port_count_).transpose()
         * Vq.block(0, k * port_count_, order_, port_count_);
       Vq.block(0, k * port_count_, order_, port_count_) =
         Vq.block(0, k * port_count_, order_, port_count_) - Vq.block(0, j * port_count_, order_, port_count_) * H;
     }
-    MatrixXd Vq_k = Vq.block(0, k * port_count_, order_, port_count_);
-    HouseholderQR<MatrixXd> Vq_k_solver(Vq_k);
-    MatrixXd VqQ = Vq_k_solver.householderQ();
+    Eigen::MatrixXd Vq_k = Vq.block(0, k * port_count_, order_, port_count_);
+    Eigen::HouseholderQR<Eigen::MatrixXd> Vq_k_solver(Vq_k);
+    Eigen::MatrixXd VqQ = Vq_k_solver.householderQ();
     Vq.block(0, k * port_count_, order_, port_count_) = 
       VqQ.block(0, 0, order_, port_count_);
   }
@@ -902,7 +913,7 @@ PrimaDelayCalc::reportGateDelay(const Pin *drvr_pin,
                                 const DcalcAnalysisPt *dcalc_ap,
                                 int digits)
 {
-  GateTimingModel *model = gateModel(arc, dcalc_ap);
+  GateTimingModel *model = arc->gateModel(dcalc_ap);
   if (model) {
     float in_slew1 = delayAsFloat(in_slew);
     return model->reportGateDelay(pinPvt(drvr_pin, dcalc_ap), in_slew1, load_cap,
@@ -950,96 +961,6 @@ PrimaDelayCalc::watchWaveform(const Pin *pin)
 
 ////////////////////////////////////////////////////////////////
 
-// Waveform accessors for swig/tcl.
-Table1
-PrimaDelayCalc::drvrWaveform(const Pin *in_pin,
-                             const RiseFall *in_rf,
-                             const Pin *drvr_pin,
-                             const RiseFall *drvr_rf,
-                             const Corner *corner,
-                             const MinMax *min_max)
-{
-  makeWaveforms(in_pin, in_rf, drvr_pin, drvr_rf, nullptr, corner, min_max);
-  TableAxisPtr time_axis = make_shared<TableAxis>(TableAxisVariable::time,
-                                                  new FloatSeq(times_));
-  Table1 waveform(new FloatSeq(drvr_voltages_), time_axis);
-  return waveform;
-}
-
-Table1
-PrimaDelayCalc::loadWaveform(const Pin *in_pin,
-                             const RiseFall *in_rf,
-                             const Pin *drvr_pin,
-                             const RiseFall *drvr_rf,
-                             const Pin *load_pin,
-                             const Corner *corner,
-                             const MinMax *min_max)
-{
-  makeWaveforms(in_pin, in_rf, drvr_pin, drvr_rf, load_pin, corner, min_max);
-  TableAxisPtr time_axis = make_shared<TableAxis>(TableAxisVariable::time,
-                                                  new FloatSeq(times_));
-  Table1 waveform(new FloatSeq(load_voltages_), time_axis);
-  return waveform;
-}
-
-Table1
-PrimaDelayCalc::inputWaveform(const Pin *in_pin,
-                              const RiseFall *in_rf,
-                              const Corner *corner,
-                              const MinMax *min_max)
-{
-  LibertyPort *port = network_->libertyPort(in_pin);
-  if (port) {
-    DriverWaveform *driver_waveform = port->driverWaveform(in_rf);
-    const Vertex *in_vertex = graph_->pinLoadVertex(in_pin);
-    DcalcAnalysisPt *dcalc_ap = corner->findDcalcAnalysisPt(min_max);
-    Slew in_slew = graph_->slew(in_vertex, in_rf, dcalc_ap->index());
-    LibertyLibrary *library = port->libertyLibrary();
-    float vdd;
-    bool vdd_exists;
-    library->supplyVoltage("VDD", vdd, vdd_exists);
-    if (!vdd_exists)
-      report_->error(1751, "VDD not defined in library %s", library->name());
-    Table1 in_waveform = driver_waveform->waveform(in_slew);
-    // Scale the waveform from 0:vdd.
-    FloatSeq *scaled_values = new FloatSeq;
-    for (float value : *in_waveform.values())
-      scaled_values->push_back(value * vdd);
-    return Table1(scaled_values, in_waveform.axis1ptr());
-  }
-  return Table1();
-}
-
-void
-PrimaDelayCalc::makeWaveforms(const Pin *in_pin,
-                              const RiseFall *in_rf,
-                              const Pin *drvr_pin,
-                              const RiseFall *drvr_rf,
-                              const Pin *load_pin,
-                              const Corner *corner,
-                              const MinMax *min_max)
-{
-  Edge *edge;
-  const TimingArc *arc;
-  graph_->gateEdgeArc(in_pin, in_rf, drvr_pin, drvr_rf, edge, arc);
-  if (arc) {
-    DcalcAnalysisPt *dcalc_ap = corner->findDcalcAnalysisPt(min_max);
-    const Parasitic *parasitic = findParasitic(drvr_pin, drvr_rf, dcalc_ap);
-    if (parasitic) {
-      make_waveforms_ = true;
-      waveform_drvr_pin_ = drvr_pin;
-      waveform_load_pin_ = load_pin;
-      Vertex *drvr_vertex = graph_->pinDrvrVertex(drvr_pin);
-      graph_delay_calc_->findDriverArcDelays(drvr_vertex, edge, arc, dcalc_ap, this);
-      make_waveforms_ = false;
-      waveform_drvr_pin_ = nullptr;
-      waveform_load_pin_ = nullptr;
-    }
-  }
-}
-
-////////////////////////////////////////////////////////////////
-
 void
 PrimaDelayCalc::reportMatrix(const char *name,
                              MatrixSd &matrix)
@@ -1050,7 +971,7 @@ PrimaDelayCalc::reportMatrix(const char *name,
 
 void
 PrimaDelayCalc::reportMatrix(const char *name,
-                             MatrixXd &matrix)
+                             Eigen::MatrixXd &matrix)
 {
   report_->reportLine("%s", name);
   reportMatrix(matrix);
@@ -1058,7 +979,7 @@ PrimaDelayCalc::reportMatrix(const char *name,
 
 void
 PrimaDelayCalc::reportMatrix(const char *name,
-                             VectorXd &matrix)
+                             Eigen::VectorXd &matrix)
 {
   report_->reportLine("%s", name);
   reportMatrix(matrix);
@@ -1066,7 +987,7 @@ PrimaDelayCalc::reportMatrix(const char *name,
 
 void
 PrimaDelayCalc::reportVector(const char *name,
-                             vector<double> &matrix)
+                             std::vector<double> &matrix)
 {
   report_->reportLine("%s", name);
   reportVector(matrix);
@@ -1075,10 +996,10 @@ PrimaDelayCalc::reportVector(const char *name,
 void
 PrimaDelayCalc::reportMatrix(MatrixSd &matrix)
 {
-  for (Index i = 0; i < matrix.rows(); i++) {
+  for (Eigen::Index i = 0; i < matrix.rows(); i++) {
     string line = "| ";
-    for (Index j = 0; j < matrix.cols(); j++) {
-      string entry = stdstrPrint("%10.3e", matrix.coeff(i, j));
+    for (Eigen::Index j = 0; j < matrix.cols(); j++) {
+      std::string entry = stdstrPrint("%10.3e", matrix.coeff(i, j));
       line += entry;
       line += " ";
     }
@@ -1088,12 +1009,12 @@ PrimaDelayCalc::reportMatrix(MatrixSd &matrix)
 }
 
 void
-PrimaDelayCalc::reportMatrix(MatrixXd &matrix)
+PrimaDelayCalc::reportMatrix(Eigen::MatrixXd &matrix)
 {
-  for (Index i = 0; i < matrix.rows(); i++) {
-    string line = "| ";
-    for (Index j = 0; j < matrix.cols(); j++) {
-      string entry = stdstrPrint("%10.3e", matrix.coeff(i, j));
+  for (Eigen::Index i = 0; i < matrix.rows(); i++) {
+    std::string line = "| ";
+    for (Eigen::Index j = 0; j < matrix.cols(); j++) {
+      std::string entry = stdstrPrint("%10.3e", matrix.coeff(i, j));
       line += entry;
       line += " ";
     }
@@ -1103,11 +1024,11 @@ PrimaDelayCalc::reportMatrix(MatrixXd &matrix)
 }
 
 void
-PrimaDelayCalc::reportMatrix(VectorXd &matrix)
+PrimaDelayCalc::reportMatrix(Eigen::VectorXd &matrix)
 {
-  string line = "| ";
-  for (Index i = 0; i < matrix.rows(); i++) {
-    string entry = stdstrPrint("%10.3e", matrix.coeff(i));
+  std::string line = "| ";
+  for (Eigen::Index i = 0; i < matrix.rows(); i++) {
+    std::string entry = stdstrPrint("%10.3e", matrix.coeff(i));
     line += entry;
     line += " ";
   }
@@ -1116,11 +1037,11 @@ PrimaDelayCalc::reportMatrix(VectorXd &matrix)
 }
 
 void
-PrimaDelayCalc::reportVector(vector<double> &matrix)
+PrimaDelayCalc::reportVector(std::vector<double> &matrix)
 {
-  string line = "| ";
+  std::string line = "| ";
   for (size_t i = 0; i < matrix.size(); i++) {
-    string entry = stdstrPrint("%10.3e", matrix[i]);
+    std::string entry = stdstrPrint("%10.3e", matrix[i]);
     line += entry;
     line += " ";
   }

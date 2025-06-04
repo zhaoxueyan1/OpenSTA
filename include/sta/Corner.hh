@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -43,7 +51,7 @@ class Corners : public StaState
 {
 public:
   explicit Corners(StaState *sta);
-  virtual ~Corners();
+  ~Corners();
   void clear();
   int count() const;
   void copy(Corners *corners);
@@ -98,8 +106,7 @@ class Corner
 public:
   Corner(const char *name,
 	 int index);
-  ~Corner();
-  const char *name() const { return name_; }
+  const char *name() const { return name_.c_str(); }
   int index() const { return index_; }
   ParasiticAnalysisPt *findParasiticAnalysisPt(const MinMax *min_max) const;
   int parasiticAnalysisPtcount();
@@ -119,7 +126,7 @@ protected:
   void addPathAP(PathAnalysisPt *path_ap);
 
 private:
-  const char *name_;
+  std::string name_;
   int index_;
   ParasiticAnalysisPtSeq parasitic_analysis_pts_;
   DcalcAnalysisPtSeq dcalc_analysis_pts_;

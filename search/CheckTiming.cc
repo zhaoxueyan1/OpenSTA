@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "CheckTiming.hh"
 
@@ -30,7 +38,7 @@
 #include "Bfs.hh"
 #include "Search.hh"
 #include "Genclks.hh"
-#include "PathVertex.hh"
+#include "Path.hh"
 #include "Sim.hh"
 
 namespace sta {
@@ -176,12 +184,10 @@ CheckTiming::checkLoops()
 {
   // These may not need to be sorted because the graph roots are
   // sorted during levelization so the discovery should be consistent.
-  GraphLoopSeq *loops = levelize_->loops();
+  GraphLoopSeq &loops = levelize_->loops();
   // Count the combinational loops.
   int loop_count = 0;
-  GraphLoopSeq::Iterator loop_iter1(loops);
-  while (loop_iter1.hasNext()) {
-    GraphLoop *loop = loop_iter1.next();
+  for (GraphLoop *loop : loops) {
     if (loop->isCombinational())
       loop_count++;
   }
@@ -238,9 +244,11 @@ CheckTiming::checkUnconstraintedOutputs(PinSet &unconstrained_ends)
   while (pin_iter->hasNext()) {
     Pin *pin = pin_iter->next();
     PortDirection *dir = network_->direction(pin);
+    Vertex *vertex = graph_->pinLoadVertex(pin);
     if (dir->isAnyOutput()
-	&& !((hasClkedDepature(pin)
-	      && hasClkedArrival(graph_->pinLoadVertex(pin)))
+	&& !vertex->isConstant()
+        && !((hasClkedDepature(pin)
+	      && hasClkedArrival(vertex))
 	     || hasMaxDelay(pin)))
       unconstrained_ends.insert(pin);
   }
@@ -286,14 +294,16 @@ CheckTiming::checkUnconstrainedSetups(PinSet &unconstrained_ends)
   VertexIterator vertex_iter(graph_);
   while (vertex_iter.hasNext()) {
     Vertex *vertex = vertex_iter.next();
-    VertexInEdgeIterator edge_iter(vertex, graph_);
-    while (edge_iter.hasNext()) {
-      Edge *edge = edge_iter.next();
-      if (edge->role() == TimingRole::setup()
-	  && (!search_->isClock(edge->from(graph_))
-	       || !hasClkedArrival(edge->to(graph_)))) {
-	unconstrained_ends.insert(vertex->pin());
-	break;
+    if (!vertex->isConstant()) {
+      VertexInEdgeIterator edge_iter(vertex, graph_);
+      while (edge_iter.hasNext()) {
+        Edge *edge = edge_iter.next();
+        if (edge->role() == TimingRole::setup()
+            && (!search_->isClock(edge->from(graph_))
+                || !hasClkedArrival(edge->to(graph_)))) {
+          unconstrained_ends.insert(vertex->pin());
+          break;
+        }
       }
     }
   }
@@ -304,7 +314,7 @@ CheckTiming::hasClkedArrival(Vertex *vertex)
 {
   VertexPathIterator path_iter(vertex, this);
   while (path_iter.hasNext()) {
-    PathVertex *path = path_iter.next();
+    Path *path = path_iter.next();
     if (path->clock(this))
       return true;
   }

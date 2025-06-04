@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -28,11 +36,9 @@ namespace sta {
 
 class Diversion;
 class PathEnumFaninVisitor;
-class PathEnumed;
 class DiversionGreater;
 
 typedef Vector<Diversion*> DiversionSeq;
-typedef Vector<PathEnumed*> PathEnumedSeq;
 typedef std::priority_queue<Diversion*,DiversionSeq,
 			    DiversionGreater> DiversionQueue;
 
@@ -52,8 +58,8 @@ private:
 class PathEnum : public Iterator<PathEnd*>, StaState
 {
 public:
-  PathEnum(int group_count,
-	   int endpoint_count,
+  PathEnum(size_t group_path_count,
+	   size_t endpoint_path_count,
 	   bool unique_pins,
 	   bool cmp_slack,
 	   const StaState *sta);
@@ -67,33 +73,33 @@ private:
   void makeDiversions(PathEnd *path_end,
 		      Path *before);
   void makeDiversion(PathEnd *div_end,
-		     PathEnumed *after_div_copy);
+		     Path *after_div_copy);
   void makeDivertedPath(Path *path,
 			Path *before_div,
 			Path *after_div,
+                        Edge *div_edge,
 			TimingArc *div_arc,
 			// Returned values.
-			PathEnumed *&div_path,
-			PathEnumed *&after_div_copy);
-  void updatePathHeadDelays(PathEnumedSeq &path,
+			Path *&div_path,
+			Path *&after_div_copy);
+  void updatePathHeadDelays(PathSeq &path,
 			    Path *after_div);
   Arrival divSlack(Path *path,
 		   Path *after_div,
-		   TimingArc *div_arc,
+                   const Edge *div_edge,
+		   const TimingArc *div_arc,
 		   const PathAnalysisPt *path_ap);
   void reportDiversionPath(Diversion *div);
   void pruneDiversionQueue();
-  Edge *divEdge(Path *before_div,
-		TimingArc *div_arc);
   void findNext();
 
   bool cmp_slack_;
-  int group_count_;
-  int endpoint_count_;
+  size_t group_path_count_;
+  size_t endpoint_path_count_;
   bool unique_pins_;
   DiversionQueue div_queue_;
   int div_count_;
-  // Number of paths returned for each endpoint (limited to endpoint_count).
+  // Number of paths returned for each endpoint (limit to endpoint_path_count).
   VertexPathCountMap path_counts_;
   bool inserts_pruned_;
   PathEnd *next_;

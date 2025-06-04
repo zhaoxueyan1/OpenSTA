@@ -1,5 +1,5 @@
 # OpenSTA, Static Timing Analyzer
-# Copyright (c) 2024, Parallax Software, Inc.
+# Copyright (c) 2025, Parallax Software, Inc.
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,13 +13,29 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
+# 
+# The origin of this software must not be misrepresented; you must not
+# claim that you wrote the original software.
+# 
+# Altered source versions must be plainly marked as such, and must not be
+# misrepresented as being the original software.
+# 
+# This notice may not be removed or altered from any source distribution.
+# 
+# The origin of this software must not be misrepresented; you must not
+# claim that you wrote the original software.
+# 
+# Altered source versions must be plainly marked as such, and must not be
+# misrepresented as being the original software.
+# 
+# This notice may not be removed or altered from any source distribution.
 
 # Regression variables.
 
 # Application program to run tests on.
 set app "sta"
 set sta_dir [file dirname $test_dir]
-set app_path [file join $sta_dir "app" $app]
+set app_path [file join $sta_dir "build" $app]
 # Application options.
 set app_options "-no_init -no_splash -exit"
 # Log files for each test are placed in result_dir.
@@ -112,18 +128,31 @@ proc list_delete { list delete } {
 
 # Record tests in sta/examples
 record_example_tests {
-  sdf_delays
   delay_calc
   min_max_delays
-  spef_parasitics
   multi_corner
   power
   power_vcd
+  sdf_delays
+  spef_parasitics
 }
 
 record_sta_tests {
-  ccs_sim1
+  get_filter
+  get_is_memory
+  get_lib_pins_of_objects
+  get_noargs
+  get_objrefs
+  liberty_arcs_one2one_1
+  liberty_arcs_one2one_2
+  liberty_ccsn
+  liberty_latch3
+  path_group_names
   prima3
+  report_checks_src_attr
+  report_json1
+  report_json2
+  suppress_msg
   verilog_attribute
 }
 

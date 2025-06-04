@@ -1,6 +1,5 @@
-
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -14,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "ExceptionPath.hh"
 
@@ -29,6 +36,8 @@
 #include "Clock.hh"
 
 namespace sta {
+
+using std::string;
 
 static bool
 thrusIntersectPts(ExceptionThruSeq *thrus1,
@@ -90,7 +99,8 @@ ExceptionPath::ExceptionPath(ExceptionFrom *from,
   to_(to),
   min_max_(min_max),
   own_pts_(own_pts),
-  priority_(priority)
+  priority_(priority),
+  id_(0)
 {
   makeStates();
 }
@@ -123,6 +133,12 @@ ExceptionPath::asString(const Network *network) const
   stringAppend(r, type);
   stringAppend(r, from_thru_to);
   return result;
+}
+
+void
+ExceptionPath::setId(size_t id)
+{
+  id_ = id;
 }
 
 ExceptionPt *
@@ -306,7 +322,7 @@ ExceptionPath::fromThruToString(const Network *network) const
   string str;
   if (min_max_ != MinMaxAll::all()) {
     str += " -";
-    str += min_max_->asString();
+    str += min_max_->to_string();
   }
 
   if (from_)
@@ -442,6 +458,20 @@ thrusIntersectPts(ExceptionThruSeq *thrus1,
   return true;
 }
 
+void
+ExceptionPath::deleteInstance(const Instance *inst,
+                              const Network *network)
+{
+  if (from_)
+    from_->deleteInstance(inst, network);
+  if (thrus_) {
+    for (ExceptionThru *thru : *thrus_)
+      thru->deleteInstance(inst, network);
+  }
+  if (to_)
+    to_->deleteInstance(inst, network);
+}
+
 ////////////////////////////////////////////////////////////////
 
 PathDelay::PathDelay(ExceptionFrom *from,
@@ -449,6 +479,7 @@ PathDelay::PathDelay(ExceptionFrom *from,
 		     ExceptionTo *to,
 		     const MinMax *min_max,
 		     bool ignore_clk_latency,
+                     bool break_path,
 		     float delay,
 		     bool own_pts,
 		     const char *comment) :
@@ -456,6 +487,7 @@ PathDelay::PathDelay(ExceptionFrom *from,
 		pathDelayPriority() + fromThruToPriority(from, thrus, to),
 		comment),
   ignore_clk_latency_(ignore_clk_latency),
+  break_path_(break_path),
   delay_(delay)
 {
 }
@@ -467,8 +499,8 @@ PathDelay::clone(ExceptionFrom *from,
 		 bool own_pts)
 {
   return new PathDelay(from, thrus, to, min_max_->asMinMax(),
-		       ignore_clk_latency_, delay_, own_pts,
-		       comment_);
+		       ignore_clk_latency_, break_path_, delay_,
+                       own_pts, comment_);
 }
 
 int
@@ -2247,19 +2279,14 @@ ExceptionState::hash() const
   return hashSum(exception_->hash(), index_);
 }
 
-ExceptionStateLess::ExceptionStateLess(const Network *network) :
-  network_(network)
-{
-}
-
 bool
 ExceptionStateLess::operator()(const ExceptionState *state1,
                                const ExceptionState *state2) const
 {
   const ExceptionPath *except1 = state1->exception();
   const ExceptionPath *except2 = state2->exception();
-  ExceptionPathLess except_less(network_);
-  return except_less(except1, except2)
+    return except1->id() < except2->id()
+  //return except1 < except2
     || (except1 == except2
         && state1->index() < state2->index());
 }

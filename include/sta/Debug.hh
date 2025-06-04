@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,10 +13,19 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
 #include <cstdarg>
+#include <mutex>
 
 #include "Map.hh"
 #include "StringUtil.hh"
@@ -41,11 +50,12 @@ public:
   int statsLevel() const { return stats_level_; }
   void reportLine(const char *what,
                   const char *fmt,
-                  ...) const
+                  ...)
     __attribute__((format (printf, 3, 4)));
 
 protected:
   Report *report_;
+  std::mutex buffer_lock_;
   bool debug_on_;
   DebugMap *debug_map_;
   int stats_level_;

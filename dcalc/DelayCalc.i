@@ -1,9 +1,5 @@
-%module dcalc
-
-%{
-
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -17,11 +13,26 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
-#include "Sta.hh"
+%module dcalc
+
+%{
+
+#include "DelayCalc.hh"
 #include "ArcDelayCalc.hh"
 #include "dcalc/ArcDcalcWaveforms.hh"
 #include "dcalc/PrimaDelayCalc.hh"
+#include "Sta.hh"
+
+using std::string;
 
 %}
 
@@ -48,7 +59,7 @@ set_delay_calculator_cmd(const char *alg)
 void
 set_delay_calc_incremental_tolerance(float tol)
 {
-  sta::Sta::sta()->setIncrementalDelayTolerance(tol);
+  Sta::sta()->setIncrementalDelayTolerance(tol);
 }
 
 string
@@ -58,92 +69,32 @@ report_delay_calc_cmd(Edge *edge,
 		      const MinMax *min_max,
 		      int digits)
 {
-  cmdLinkedNetwork();
-  return Sta::sta()->reportDelayCalc(edge, arc, corner, min_max, digits);
-}
-
-////////////////////////////////////////////////////////////////
-
-Table1
-ccs_input_waveform(const Pin *in_pin,
-                   const RiseFall *in_rf,
-                   const Corner *corner,
-                   const MinMax *min_max)
-{
-  cmdLinkedNetwork();
   Sta *sta = Sta::sta();
-  ArcDcalcWaveforms *arc_dcalc = dynamic_cast<ArcDcalcWaveforms*>(sta->arcDelayCalc());
-  if (arc_dcalc)
-    return arc_dcalc->inputWaveform(in_pin, in_rf, corner, min_max);
-  else
-    return Table1();
-}
-
-Table1
-ccs_driver_waveform(const Pin *in_pin,
-                    const RiseFall *in_rf,
-                    const Pin *drvr_pin,
-                    const RiseFall *drvr_rf,
-                    const Corner *corner,
-                    const MinMax *min_max)
-{
-  cmdLinkedNetwork();
-  Sta *sta = Sta::sta();
-  ArcDcalcWaveforms *arc_dcalc = dynamic_cast<ArcDcalcWaveforms*>(sta->arcDelayCalc());
-  if (arc_dcalc)
-    return arc_dcalc->drvrWaveform(in_pin, in_rf, drvr_pin, drvr_rf, corner, min_max);
-  else
-    return Table1();
-}
-
-Table1
-ccs_driver_ramp_waveform(const Pin *in_pin,
-                         const RiseFall *in_rf,
-                         const Pin *drvr_pin,
-                         const RiseFall *drvr_rf,
-                         const Pin *load_pin,
-                         const Corner *corner,
-                         const MinMax *min_max)
-{
-  cmdLinkedNetwork();
-  Sta *sta = Sta::sta();
-  ArcDcalcWaveforms *arc_dcalc = dynamic_cast<ArcDcalcWaveforms*>(sta->arcDelayCalc());
-  if (arc_dcalc)
-    return arc_dcalc->drvrRampWaveform(in_pin, in_rf, drvr_pin, drvr_rf,
-                                       load_pin, corner, min_max);
-  else
-    return Table1();
-}
-
-Table1
-ccs_load_waveform(const Pin *in_pin,
-                  const RiseFall *in_rf,
-                  const Pin *drvr_pin,
-                  const RiseFall *drvr_rf,
-                  const Pin *load_pin,
-                  const Corner *corner,
-                  const MinMax *min_max)
-{
-  cmdLinkedNetwork();
-  Sta *sta = Sta::sta();
-  ArcDcalcWaveforms *arc_dcalc = dynamic_cast<ArcDcalcWaveforms*>(sta->arcDelayCalc());
-  if (arc_dcalc)
-    return arc_dcalc->loadWaveform(in_pin, in_rf, drvr_pin, drvr_rf,
-                                   load_pin, corner, min_max);
-  else
-    return Table1();
+  return sta->reportDelayCalc(edge, arc, corner, min_max, digits);
 }
 
 void
 set_prima_reduce_order(size_t order)
 {
-  cmdLinkedNetwork();
   Sta *sta = Sta::sta();
   PrimaDelayCalc *dcalc = dynamic_cast<PrimaDelayCalc*>(sta->arcDelayCalc());
   if (dcalc) {
     dcalc->setPrimaReduceOrder(order);
     sta->delaysInvalid();
   }
+}
+
+void
+find_delays()
+{
+  Sta::sta()->findDelays();
+}
+
+void
+delays_invalid()
+{
+  Sta *sta = Sta::sta();
+  sta->delaysInvalid();
 }
 
 %} // inline

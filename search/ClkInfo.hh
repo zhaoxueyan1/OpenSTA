@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,16 +13,25 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
 #include "Transition.hh"
 #include "SearchClass.hh"
-#include "PathVertexRep.hh"
+#include "Sdc.hh"
+#include "Path.hh"
 
 namespace sta {
 
-class PathVertex;
+class Path;
 
 class ClkInfo
 {
@@ -37,28 +46,28 @@ public:
 	  float latency,
 	  ClockUncertainties *uncertainties,
           PathAPIndex path_ap_index,
-	  PathVertexRep &crpr_clk_path,
+	  Path *crpr_clk_path,
 	  const StaState *sta);
   ~ClkInfo();
-  const char *asString(const StaState *sta) const;
+  std::string to_string(const StaState *sta) const;
   const ClockEdge *clkEdge() const { return clk_edge_; }
   const Clock *clock() const;
   const Pin *clkSrc() const { return clk_src_; }
   bool isPropagated() const { return is_propagated_; }
   const Pin *genClkSrc() const { return gen_clk_src_; }
   bool isPulseClk() const { return is_pulse_clk_; }
-  RiseFall *pulseClkSense() const;
+  const RiseFall *pulseClkSense() const;
   int pulseClkSenseTrIndex() const { return pulse_clk_sense_; }
   float latency() const { return latency_; }
   Arrival &insertion() { return insertion_; }
   const Arrival &insertion() const { return insertion_; }
   ClockUncertainties *uncertainties() const { return uncertainties_; }
   PathAPIndex pathAPIndex() const { return path_ap_index_; }
-  // Clock path for the last driver in the clock network used for
-  // crpr resolution.
-  PathVertexRep &crprClkPath() { return crpr_clk_path_; }
-  const PathVertexRep &crprClkPath() const { return crpr_clk_path_; }
-  VertexId crprClkVertexId() const;
+  // Clock path used for crpr resolution.
+  // Null for clocks because the path cannot point to itself.
+  Path *crprClkPath(const StaState *sta);
+  const Path *crprClkPath(const StaState *sta) const;
+  VertexId crprClkVertexId(const StaState *sta) const;
   bool hasCrprClkPin() const { return !crpr_clk_path_.isNull(); }
   bool refsFilter(const StaState *sta) const;
   // This clk_info/tag is used for a generated clock source path.
@@ -72,7 +81,7 @@ private:
   const ClockEdge *clk_edge_;
   const Pin *clk_src_;
   const Pin *gen_clk_src_;
-  PathVertexRep crpr_clk_path_;
+  Path crpr_clk_path_;
   ClockUncertainties *uncertainties_;
   Arrival insertion_;
   float latency_;
@@ -83,6 +92,15 @@ private:
   unsigned int pulse_clk_sense_:RiseFall::index_bit_count;
   unsigned int path_ap_index_:path_ap_index_bit_count;
 };
+
+int
+clkInfoCmp(const ClkInfo *clk_info1,
+	   const ClkInfo *clk_info2,
+	   const StaState *sta);
+bool
+clkInfoEqual(const ClkInfo *clk_info1,
+	     const ClkInfo *clk_info2,
+	     const StaState *sta);
 
 class ClkInfoLess
 {

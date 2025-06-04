@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -27,6 +35,7 @@ class NetworkReader;
 class Sdc;
 class Corners;
 class Graph;
+class Edge;
 class Levelize;
 class Sim;
 class Search;
@@ -36,6 +45,7 @@ class GraphDelayCalc;
 class Latches;
 class ClkNetwork;
 class DispatchQueue;
+class Variables;
 
 // Most STA components use functionality in other components.
 // This class simplifies the process of copying pointers to the
@@ -46,7 +56,7 @@ class StaState
 public:
   // Make an empty state.
   StaState();
-  explicit StaState(const StaState *sta);
+  StaState(const StaState *sta);
   // Copy the state from sta.  This is virtual so that a component
   // can notify sub-components.
   virtual void copyState(const StaState *sta);
@@ -94,8 +104,12 @@ public:
   ClkNetwork *clkNetwork() { return clk_network_; }
   ClkNetwork *clkNetwork() const { return clk_network_; }
   unsigned threadCount() const { return thread_count_; }
-  bool pocvEnabled() const { return pocv_enabled_; }
   float sigmaFactor() const { return sigma_factor_; }
+  bool crprActive() const;
+  Variables *variables() { return variables_; }
+  const Variables *variables() const { return variables_; }
+  // Edge is default cond disabled by timing_disable_cond_default_arcs var.
+  bool isDisabledCondDefault(Edge *edge) const;
 
 protected:
   Report *report_;
@@ -116,9 +130,9 @@ protected:
   Search *search_;
   Latches *latches_;
   ClkNetwork *clk_network_;
+  Variables *variables_;
   int thread_count_;
   DispatchQueue *dispatch_queue_;
-  bool pocv_enabled_;
   float sigma_factor_;
 };
 

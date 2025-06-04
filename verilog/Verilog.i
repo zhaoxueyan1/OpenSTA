@@ -1,9 +1,5 @@
-%module verilog
-
-%{
-
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -17,15 +13,20 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
-#include "VerilogReader.hh"
+%module verilog
+
+%{
 #include "VerilogWriter.hh"
 #include "Sta.hh"
-
-using sta::Sta;
-using sta::NetworkReader;
-using sta::readVerilogFile;
-
 %}
 
 %inline %{
@@ -33,20 +34,7 @@ using sta::readVerilogFile;
 bool
 read_verilog_cmd(const char *filename)
 {
-  Sta *sta = Sta::sta();
-  NetworkReader *network = sta->networkReader();
-  if (network) {
-    sta->readNetlistBefore();
-    return readVerilogFile(filename, network);
-  }
-  else
-    return false;
-}
-
-void
-delete_verilog_reader()
-{
-  deleteVerilogReader();
+  return Sta::sta()->readVerilog(filename);
 }
 
 void
@@ -57,8 +45,7 @@ write_verilog_cmd(const char *filename,
 {
   // This does NOT want the SDC (cmd) network because it wants
   // to see the sta internal names.
-  Sta *sta = Sta::sta();
-  Network *network = sta->network();
+  Network *network = Sta::sta()->network();
   writeVerilog(filename, sort, include_pwr_gnd, remove_cells, network);
   delete remove_cells;
 }

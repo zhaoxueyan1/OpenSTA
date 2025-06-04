@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -45,10 +53,10 @@ public:
   PatternMatch(const char *pattern);
   PatternMatch(const char *pattern,
 	       const PatternMatch *inherit_from);
-  PatternMatch(const string &pattern,
+  PatternMatch(const std::string &pattern,
 	       const PatternMatch *inherit_from);
   bool match(const char *str) const;
-  bool match(const string &str) const;
+  bool match(const std::string &str) const;
   bool matchNoCase(const char *str) const;
   const char *pattern() const { return pattern_; }
   bool isRegexp() const { return is_regexp_; }

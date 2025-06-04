@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -34,10 +42,8 @@ class PinVisitor;
 typedef Map<const char*, LibertyLibrary*, CharPtrLess> LibertyLibraryMap;
 // Link network function returns top level instance.
 // Return nullptr if link fails.
-typedef Instance *(LinkNetworkFunc)(const char *top_cell_name,
-				    bool make_black_boxes,
-				    Report *report,
-				    NetworkReader *network);
+typedef std::function<Instance* (const char *top_cell_name,
+                                 bool make_black_boxes)> LinkNetworkFunc;
 typedef Map<const Net*, PinSet*> NetDrvrPinsMap;
 
 // The Network class defines the network API used by sta.
@@ -123,7 +129,7 @@ public:
   virtual void readLibertyAfter(LibertyLibrary *library);
   // First liberty library read is used to look up defaults.
   // This corresponds to a link_path of '*'.
-  LibertyLibrary *defaultLibertyLibrary() const;
+  virtual LibertyLibrary *defaultLibertyLibrary() const;
   void setDefaultLibertyLibrary(LibertyLibrary *library);
   // Check liberty cells used by the network to make sure they exist
   // for all the defined corners.
@@ -145,8 +151,9 @@ public:
   // Filename may return null.
   virtual const char *filename(const Cell *cell) = 0;
   // Attributes can be null
-  virtual string getAttribute(const Cell *cell,
-                              const string &key) const = 0;
+  virtual std::string getAttribute(const Cell *cell,
+                                   const std::string &key) const = 0;
+  virtual const AttributeMap &attributeMap(const Cell *cell) const = 0;
   // Name can be a simple, bundle, bus, or bus bit name.
   virtual Port *findPort(const Cell *cell,
 			 const char *name) const = 0;
@@ -202,15 +209,16 @@ public:
   virtual bool isTopInstance(const Instance *inst) const;
   virtual Instance *findInstance(const char *path_name) const;
   // Find instance relative to hierarchical instance.
-  Instance *findInstanceRelative(const Instance *inst,
-				 const char *path_name) const;
+  virtual Instance *findInstanceRelative(const Instance *inst,
+                                         const char *path_name) const;
   // Default implementation uses linear search.
   virtual InstanceSeq findInstancesMatching(const Instance *context,
                                             const PatternMatch *pattern) const;
   virtual InstanceSeq findInstancesHierMatching(const Instance *instance,
                                                 const PatternMatch *pattern) const;
-  virtual string getAttribute(const Instance *inst,
-                              const string &key) const = 0;
+  virtual std::string getAttribute(const Instance *inst,
+                                   const std::string &key) const = 0;
+  virtual const AttributeMap &attributeMap(const Instance *inst) const = 0;
   // Hierarchical path name.
   virtual const char *pathName(const Instance *instance) const;
   bool pathNameLess(const Instance *inst1,
@@ -355,8 +363,8 @@ public:
   virtual ObjectId id(const Net *net) const = 0;
   virtual Net *findNet(const char *path_name) const;
   // Find net relative to hierarchical instance.
-  Net *findNetRelative(const Instance *inst,
-		       const char *path_name) const;
+  virtual Net *findNetRelative(const Instance *inst,
+                               const char *path_name) const;
   // Default implementation uses linear search.
   virtual NetSeq findNetsMatching(const Instance *context,
                                   const PatternMatch *pattern) const;
@@ -513,6 +521,7 @@ public:
 		       LibertyPort *port,
 		       Net *net) = 0;
   // makePin/connectPin replaced by connect.
+  // deprecated 2018-09-28
   virtual void connectPin(Pin *pin,
 			  Net *net) __attribute__ ((deprecated));
   // Disconnect pin from net.
@@ -534,7 +543,7 @@ public:
   NetworkReader() {}
   // Called before reading a netlist to delete any previously linked network.
   virtual void readNetlistBefore() = 0;
-  virtual void setLinkFunc(LinkNetworkFunc *link) = 0;
+  virtual void setLinkFunc(LinkNetworkFunc link) = 0;
   virtual Library *makeLibrary(const char *name,
 			       const char *filename) = 0;
   virtual void deleteLibrary(Library *library) = 0;
@@ -550,11 +559,11 @@ public:
   virtual void setIsLeaf(Cell *cell,
 			 bool is_leaf) = 0;
   virtual void setAttribute(Cell *cell,
-                            const string &key,
-                            const string &value) = 0;
+                            const std::string &key,
+                            const std::string &value) = 0;
   virtual void setAttribute(Instance *instance,
-                            const string &key,
-                            const string &value) = 0;
+                            const std::string &key,
+                            const std::string &value) = 0;
   virtual Port *makePort(Cell *cell,
 			 const char *name) = 0;
   virtual Port *makeBusPort(Cell *cell,

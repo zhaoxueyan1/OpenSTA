@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -49,6 +57,8 @@ public:
 		int priority,
 		const char *comment);
   virtual ~ExceptionPath();
+  size_t id() const { return id_; }
+  void setId(size_t id);
   virtual bool isFalse() const { return false; }
   virtual bool isLoop() const { return false; }
   virtual bool isMultiCycle() const { return false; }
@@ -109,13 +119,17 @@ public:
 			       ExceptionThruSeq *thrus,
 			       ExceptionTo *to,
 			       bool own_pts) = 0;
+  void deleteInstance(const Instance *inst,
+                      const Network *network);
+
   // Default handlers.
   virtual bool useEndClk() const { return false; }
   virtual int pathMultiplier() const { return 0; }
   virtual float delay() const { return 0.0; }
   virtual const char *name() const { return nullptr; }
   virtual bool isDefault() const { return false; }
-  virtual bool ignoreClkLatency() { return false; }
+  virtual bool ignoreClkLatency() const { return false; }
+  virtual bool breakPath() const { return false; }
 
 protected:
   virtual const char *typeString() const = 0;
@@ -128,6 +142,7 @@ protected:
   const MinMaxAll *min_max_;
   bool own_pts_;
   int priority_;
+  size_t id_;                   // Unique ID assigned by Sdc.
   ExceptionState *states_;
 };
 
@@ -183,6 +198,7 @@ public:
 	    ExceptionTo *to,
 	    const MinMax *min_max,
 	    bool ignore_clk_latency,
+            bool break_path,
 	    float delay,
 	    bool own_pts,
 	    const char *comment);
@@ -199,10 +215,12 @@ public:
   virtual float delay() const { return delay_; }
   virtual int typePriority() const;
   virtual bool tighterThan(ExceptionPath *exception) const;
-  virtual bool ignoreClkLatency() { return ignore_clk_latency_; }
+  virtual bool ignoreClkLatency() const { return ignore_clk_latency_; }
+  virtual bool breakPath() const { return break_path_; }
 
 protected:
   bool ignore_clk_latency_;
+  bool break_path_;
   float delay_;
 };
 
@@ -399,14 +417,14 @@ public:
 			       Network *) {}
   virtual void disconnectPinBefore(const Pin *,
 				   Network *) {}
+  void deleteInstance(const Instance *inst,
+                      const Network *network);
 
 protected:
   virtual void findHash(const Network *network);
 
   void deletePin(const Pin *pin,
                  const Network *network);
-  void deleteInstance(const Instance *inst,
-                      const Network *network);
   virtual const char *cmdKeyword() const = 0;
 
   PinSet *pins_;
@@ -521,6 +539,8 @@ public:
 			       Network *network);
   virtual void disconnectPinBefore(const Pin *pin,
 				   Network *network);
+  void deleteInstance(const Instance *inst,
+                      const Network *network);
 
 protected:
   void findHash(const Network *network);
@@ -538,8 +558,6 @@ protected:
   void deleteEdge(const EdgePins &edge);
   void deleteNet(const Net *net,
                  const Network *network);
-  void deleteInstance(const Instance *inst,
-                      const Network *network);
   void makeAllEdges(const Network *network);
   void makePinEdges(const Network *network);
   void makeNetEdges(const Network *network);

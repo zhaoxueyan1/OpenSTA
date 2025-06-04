@@ -1,3 +1,7 @@
+# Static Timing Analysis
+
+This is effectively a fork of [parallaxsw/OpenSTA](https://github.com/parallaxsw/OpenSTA).  All issues and PRs should be filed there.
+
 # Parallax Static Timing Analyzer
 
 OpenSTA is a gate level static timing verifier. As a stand-alone
@@ -9,6 +13,8 @@ standard file formats.
 * SDC timing constraints
 * SDF delay annotation
 * SPEF parasitics
+* VCD power acitivies
+* SAIF power acitivies
 
 OpenSTA uses a TCL command interpreter to read the design, specify
 timing constraints and print timing reports.
@@ -49,8 +55,8 @@ netlist data structures without duplicating them.
 * Simulator to propagate constants from constraints and netlist tie high/low
 
 See doc/OpenSTA.pdf for command documentation.
-See doc/StaApi.txt for timing engine API documentation.
 See doc/ChangeLog.txt for changes to commands.
+See doc/StaApi.txt for timing engine API documentation.
 
 OpenSTA is dual licensed. It is released under GPL v3 as OpenSTA and
 is also licensed for commerical applications by Parallax Software without
@@ -60,9 +66,8 @@ OpenSTA is open source, meaning the sources are published and can be
 compiled locally.  Derivative works are supported as long as they
 adhere to the GPL license requirements.  However, OpenSTA is not
 supported by a public community of developers as many other open
-source projects are. The copyright and develpment are exclusive to
-Parallax Software. Contributors must signing the Contributor License
-Agreement (doc/CLA.txt) when submitting pull requests.
+source projects are. The copyright and development are exclusive to
+Parallax Software.
 
 Removing copyright and license notices from OpenSTA sources (or any
 other open source project for that matter) is illegal. This should be
@@ -75,79 +80,74 @@ https://github.com/parallaxsw/OpenSTA.git. Any forks from this code
 base have not passed extensive regression testing which is not
 publicly available.
 
-## Build
+## Build from source
 
 OpenSTA is built with CMake.
 
 ### Prerequisites
 
-The build dependency versions are show below.  Other versions may
+The build dependency versions are shown below.  Other versions may
 work, but these are the versions used for development.
 
 ```
-         from   Ubuntu   Macos
-                22.04.2  14.4.1
-cmake    3.10.2 3.24.2   3.29.2
-clang    9.1.0           15.0.0
-gcc      3.3.2   11.4.0  
-tcl      8.4     8.6     8.6.6
-swig     1.3.28  4.1.0   4.2.1
-bison    1.35    3.8.2   3.8.2
-flex     2.5.4   2.6.4   2.6.4
+         Ubuntu   Macos
+        22.04.2   14.5
+cmake    3.24.2    3.29.2
+clang             15.0.0
+gcc      11.4.0
+tcl       8.6      8.6.16
+swig      4.1.0    4.1.1
+bison     3.8.2    3.8.2
+flex      2.6.4    2.6.4
 ```
-
-Note that flex versions before 2.6.4 contain 'register' declarations that
-are illegal in c++17.
 
 External library dependencies:
 ```
-         from   Ubuntu   Macos
-eigen           3.4 .0   3.4.0 required
-tclreadline              2.3.8 optional
-libz     1.1.4   1.2.5   1.2.8 optional
-cudd             2.4.1   3.0.0 optional
+           Ubuntu   Darwin  License
+eigen       3.4.0   3.4.0   MPL2  required
+cudd        3.0.0   3.0.0   BSD   required
+tclreadline 2.3.8   2.3.8   BSD   optional
+zLib        1.2.5   1.2.8   zlib  optional
 ```
 
 The [TCL readline library](https://tclreadline.sourceforge.net/tclreadline.html)
-links the GNU readline library to the TCL interpreter for command line editing 
-On OSX, Homebrew does not support tclreadline, but the macports system does
-(see https://www.macports.org). To enable TCL readline support use the following
-Cmake option:
+links the GNU readline library to the TCL interpreter for command line
+editing To enable TCL readline support use the following Cmake option:
+See (https://tclreadline.sourceforge.net/) for TCL readline
+documentation. To change the overly verbose default prompt, add
+something this to your ~/.sta init file:
 
 ```
-cmake .. -DUSE_TCL_READLINE=ON
+if { ![catch {package require tclreadline}] } {
+  proc tclreadline::prompt1 {} {
+    return "> "
+  }
+}
 ```
 
 The Zlib library is an optional.  If CMake finds libz, OpenSTA can
-read Verilog, SDF, SPF, and SPEF files compressed with gzip.
+read Liberty, Verilog, SDF, SPF, and SPEF files compressed with gzip.
 
 CUDD is a binary decision diageram (BDD) package that is used to
-improve conditional timing arc handling. OpenSTA does not require it
-to be installed. It is available
-[here](https://www.davidkebo.com/source/cudd_versions/cudd-3.0.0.tar.gz)
-or [here](https://sourceforge.net/projects/cudd-mirror/).
+improve conditional timing arc handling, constant propagation, power
+activity propagation and spice netlist generation.
 
-Note that the file hierarchy of the CUDD installation changed with version 3.0.
-Some changes to CMakeLists.txt are required to support older versions.
+CUDD is available
+[here](https://github.com/davidkebo/cudd/blob/main/cudd_versions/cudd-3.0.0.tar.gz).
 
-Use the USE_CUDD option to look for the cudd library.
-Use the CUDD_DIR option to set the install directory if it is not in
-one of the normal install directories.
+Unpack and build CUDD.
 
-When building CUDD you may use the `--prefix ` option to `configure` to
-install in a location other than the default (`/usr/local/lib`).
 ```
-cd $HOME/cudd-3.0.0
-mkdir $HOME/cudd
-./configure --prefix $HOME/cudd
+tar xvfz cudd-3.0.0.tar.gz
+cd cudd-3.0.0
+./configure
 make
-make install
-
-cd <opensta>/build
-cmake .. -DUSE_CUDD=ON -DCUDD_DIR=$HOME/cudd
 ```
 
-### Installing with CMake
+You can use the "configure --prefix" option and "make install" to install CUDD
+in a different directory.
+
+### Building with CMake
 
 Use the following commands to checkout the git repository and build the
 OpenSTA library and excutable.
@@ -157,12 +157,12 @@ git clone https://github.com/parallaxsw/OpenSTA.git
 cd OpenSTA
 mkdir build
 cd build
-cmake ..
+cmake -DCUDD_DIR=<CUDD_INSTALL_DIR> ,.
 make
 ```
 The default build type is release to compile optimized code.
-The resulting executable is in `app/sta`.
-The library without a `main()` procedure is `app/libSTA.a`.
+The resulting executable is in `build/sta`.
+The library without a `main()` procedure is `build/libOpenSTA.a`.
 
 Optional CMake variables passed as -D<var>=<value> arguments to CMake are show below.
 
@@ -171,7 +171,7 @@ CMAKE_BUILD_TYPE DEBUG|RELEASE
 CMAKE_CXX_FLAGS - additional compiler flags
 TCL_LIBRARY - path to tcl library
 TCL_HEADER - path to tcl.h
-CUDD - path to cudd installation
+CUDD_DIR - path to cudd installation
 ZLIB_ROOT - path to zlib
 CMAKE_INSTALL_PREFIX
 ```
@@ -180,15 +180,53 @@ If `TCL_LIBRARY` is specified the CMake script will attempt to locate
 the header from the library path.
 
 The default install directory is `/usr/local`.
-To install in a different directory with CMake use:
-
-```
-cmake .. -DCMAKE_INSTALL_PREFIX=<prefix_path>
-```
+To install in a different directory with CMake use the CMAKE_INSTALL_PREFIX option.
 
 If you make changes to `CMakeLists.txt` you may need to clean out
 existing CMake cached variable values by deleting all of the
 files in the build directory.
+
+## Build with Docker
+
+An alternative way to build and run OpenSTA is with
+[Docker](https://www.docker.com).  After installing Docker, the
+following command builds a Docker image.
+
+```
+cd OpenSTA
+docker build --file Dockerfile.ubuntu22.04 --tag opensta .
+```
+
+To run a docker container using the OpenSTA image, use the -v option
+to docker to mount direcories with data to use and -i to run
+interactively.
+
+```
+docker run -i -v $HOME:/data opensta
+```
+
+## Build on Macos/Darwin
+
+The XCode versions of Tcl, Flex and Bison cannot be used to build OpenSTA.
+Use Homebrew to install them. The following command installs the tools
+required to build OpenSTA in the Brewfile.
+
+```
+brew bundle install
+```
+
+Set these variables before using cmake to cirumvent the Xcode versions.
+
+```
+  # flex/bison override apple version
+  export PATH="$(brew --prefix bison)/bin:${PATH}"
+  export PATH="$(brew --prefix flex)/bin:${PATH}"
+  export CMAKE_INCLUDE_PATH="$(brew --prefix flex)/include"
+  export CMAKE_LIBRARY_PATH="$(brew --prefix flex)/lib;$(brew --prefix bison)/lib"
+```
+
+Homebrew does not support tclreadline, but the macports system does
+(see https://www.macports.org). 
 
 ## Bug Reports
 
@@ -215,11 +253,32 @@ Command files should not have absolute filenames like
 These obviously are not portable. Use filenames relative to the test
 case directory.
 
+## Contributions
+
+Contributors must sign the Contributor License Agreement (doc/CLA.txt)
+when submitting pull requests.
+
+All contributors should read doc/CodingGuidelines.txt for notes on
+making code that adheres to the existing naming and formatting style.
+
+Contributions that claim 4% performance improvements in OpenROAD flow
+scripts will largely be ignored. Small performance improvements
+simply do not justify the time required to audit and verify the changes.
+
+Contributions that add dependencies on external libraries like boost,
+abseil and Intel TBB will not be accepted.
+
+As the author of OpenSTA I vastly prefer writing code to reviewing
+code.  I don't have the patience to go round after round to correct
+code formatting that is not consistent with the rest of the code.
+
 ## Authors
 
 * James Cherry
 
-* William Scott authored the arnoldi delay calculator at Blaze, Inc which was subsequently licensed to Nefelus, Inc that has graciously contributed it to OpenSTA.
+* William Scott authored the arnoldi delay calculator at Blaze, Inc
+  which was subsequently licensed to Nefelus, Inc that has graciously
+  contributed it to OpenSTA.
 
 ## License
 

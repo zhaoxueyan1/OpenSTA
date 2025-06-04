@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "Sequential.hh"
 
@@ -51,6 +59,26 @@ Sequential::~Sequential()
     clear_->deleteSubexprs();
   if (preset_)
     preset_->deleteSubexprs();
+}
+
+////////////////////////////////////////////////////////////////
+
+Statetable::Statetable(LibertyPortSeq &input_ports,
+                       LibertyPortSeq &internal_ports,
+                       StatetableRows &table) :
+  input_ports_(input_ports),
+  internal_ports_(internal_ports),
+  table_(table)
+{
+}
+
+StatetableRow::StatetableRow(StateInputValues &input_values,
+                             StateInternalValues &current_values,
+                             StateInternalValues &next_values) :
+  input_values_(input_values),
+  current_values_(current_values),
+  next_values_(next_values)
+{
 }
 
 } // namespace

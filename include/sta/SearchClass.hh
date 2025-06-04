@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -33,11 +41,6 @@ namespace sta {
 class Search;
 class Corner;
 class Path;
-class PathRep;
-class PathVertex;
-class PathVertexRep;
-class PathRef;
-class PathEnumed;
 class PathEnd;
 class PathGroup;
 class Tag;
@@ -111,12 +114,12 @@ typedef Vector<MaxSkewCheck*> MaxSkewCheckSeq;
 typedef StringSet PathGroupNameSet;
 typedef Vector<PathEnd*> PathEndSeq;
 typedef Vector<Arrival> ArrivalSeq;
-typedef Map<Vertex*, int> VertexPathCountMap;
-typedef UnorderedMap<Tag*, int, TagMatchHash, TagMatchEqual> ArrivalMap;
-typedef Vector<PathVertex> PathVertexSeq;
+typedef Map<Vertex*, size_t> VertexPathCountMap;
+typedef Map<Tag*, size_t, TagMatchLess> PathIndexMap;
 typedef Vector<Slack> SlackSeq;
 typedef Delay Crpr;
-typedef Vector<PathRef> PathRefSeq;
+typedef Vector<Path*> PathSeq;
+typedef std::vector<const Path*> ConstPathSeq;
 
 enum class ReportPathFormat { full,
 			      full_clock,
@@ -128,7 +131,8 @@ enum class ReportPathFormat { full,
 			      json
 };
 
-static const TagIndex tag_index_max = std::numeric_limits<uint32_t>::max();
+static const TagIndex tag_index_bit_count = 28;
+static const TagIndex tag_index_max = (1 << tag_index_bit_count) - 1;
 static const TagIndex tag_index_null = tag_index_max;
 static const int path_ap_index_bit_count = 8;
 // One path analysis point per corner min/max.

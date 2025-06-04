@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "SearchPred.hh"
 
@@ -25,6 +33,7 @@
 #include "Levelize.hh"
 #include "Search.hh"
 #include "Latches.hh"
+#include "Variables.hh"
 
 namespace sta {
 
@@ -51,19 +60,20 @@ SearchPred0::searchThru(Edge *edge)
 {
   const TimingRole *role = edge->role();
   const Sdc *sdc = sta_->sdc();
+  const Variables *variables = sta_->variables();
   return !(edge->isDisabledConstraint()
 	   // Constants disable edge cond expression.
 	   || edge->isDisabledCond()
 	   || sdc->isDisabledCondDefault(edge)
 	   // Register/latch preset/clr edges are disabled by default.
 	   || (role == TimingRole::regSetClr()
-	       && !sdc->presetClrArcsEnabled())
+	       && !variables->presetClrArcsEnabled())
 	   // Constants on other pins disable this edge (ie, a mux select).
 	   || edge->simTimingSense() == TimingSense::none
 	   || (edge->isBidirectInstPath()
-	       && !sdc->bidirectInstPathsEnabled())
+	       && !variables->bidirectInstPathsEnabled())
 	   || (edge->isBidirectNetPath()
-	       && !sdc->bidirectNetPathsEnabled())
+	       && !variables->bidirectNetPathsEnabled())
 	   || (role == TimingRole::latchDtoQ()
 	       && sta_->latches()->latchDtoQState(edge)
 	       == LatchEnableState::closed));
@@ -144,12 +154,11 @@ ClkTreeSearchPred::ClkTreeSearchPred(const StaState *sta) :
 bool
 ClkTreeSearchPred::searchThru(Edge *edge)
 {
-  const Sdc *sdc = sta_->sdc();
   // Propagate clocks through constants.
   const TimingRole *role = edge->role();
   return (role->isWire()
 	  || role == TimingRole::combinational())
-    && (sdc->clkThruTristateEnabled()
+    && (sta_->variables()->clkThruTristateEnabled()
 	|| !(role == TimingRole::tristateEnable()
 	     || role == TimingRole::tristateDisable()))
     && SearchPred1::searchThru(edge);
@@ -176,8 +185,8 @@ searchThru(const Edge *edge,
 	   const TimingArc *arc,
 	   const Graph *graph)
 {
-  RiseFall *from_rf = arc->fromEdge()->asRiseFall();
-  RiseFall *to_rf = arc->toEdge()->asRiseFall();
+  const RiseFall *from_rf = arc->fromEdge()->asRiseFall();
+  const RiseFall *to_rf = arc->toEdge()->asRiseFall();
   // Ignore transitions other than rise/fall.
   return from_rf && to_rf
     && searchThru(edge->from(graph), from_rf, edge, edge->to(graph), to_rf);

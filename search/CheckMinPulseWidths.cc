@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "CheckMinPulseWidths.hh"
 
@@ -27,8 +35,7 @@
 #include "GraphDelayCalc.hh"
 #include "ClkInfo.hh"
 #include "Tag.hh"
-#include "PathVertex.hh"
-#include "PathRef.hh"
+#include "Path.hh"
 #include "Corner.hh"
 #include "PathAnalysisPt.hh"
 #include "SearchPred.hh"
@@ -238,12 +245,12 @@ visitMinPulseWidthChecks(MinPulseWidthCheckVisitor *visitor)
 {
   Graph *graph = sta_->graph();
   Debug *debug = sta_->debug();
-  Network *sdc_network = sta_->network();
   VertexIterator vertex_iter(graph);
   while (vertex_iter.hasNext()) {
     Vertex *vertex = vertex_iter.next();
     if (isClkEnd(vertex, graph)) {
-      debugPrint(debug, "mpw", 1, "check mpw %s", vertex->name(sdc_network));
+      debugPrint(debug, "mpw", 1, "check mpw %s",
+                 vertex->to_string(sta_).c_str());
       visitMinPulseWidthChecks(vertex, visitor);
     }
   }
@@ -267,10 +274,9 @@ visitMinPulseWidthChecks(Vertex *vertex,
 	minPulseWidth(path, sta_, min_width, exists);
 	if (exists) {
 	  MinPulseWidthCheck check(path);
-	  PathVertex close_path;
-	  check.closePath(sta_, close_path);
+	  Path *close_path = check.closePath(sta_);
 	  // Don't bother visiting if nobody is home.
-	  if (!close_path.isNull())
+	  if (close_path)
 	    visitor->visit(check, sta_);
 	}
       }
@@ -281,7 +287,7 @@ visitMinPulseWidthChecks(Vertex *vertex,
 ////////////////////////////////////////////////////////////////
 
 MinPulseWidthCheck::MinPulseWidthCheck() :
-  open_path_()
+  open_path_(nullptr)
 {
 }
 
@@ -293,31 +299,29 @@ MinPulseWidthCheck::MinPulseWidthCheck(Path *open_path) :
 MinPulseWidthCheck *
 MinPulseWidthCheck::copy()
 {
-  return new MinPulseWidthCheck(&open_path_);
+  return new MinPulseWidthCheck(open_path_);
 }
 
 Pin *
 MinPulseWidthCheck::pin(const StaState *sta) const
 {
-  return open_path_.pin(sta);
+  return open_path_->pin(sta);
 }
 
 const RiseFall *
 MinPulseWidthCheck::openTransition(const StaState *sta) const
 {
-  return open_path_.transition(sta);
+  return open_path_->transition(sta);
 }
 
-void
-MinPulseWidthCheck::closePath(const StaState *sta,
-			      // Return value.
-			      PathVertex &close) const
+Path *
+MinPulseWidthCheck::closePath(const StaState *sta) const
 {
-  PathAnalysisPt *open_ap = open_path_.pathAnalysisPt(sta);
+  PathAnalysisPt *open_ap = open_path_->pathAnalysisPt(sta);
   PathAnalysisPt *close_ap = open_ap->tgtClkAnalysisPt();
-  const RiseFall *open_rf = open_path_.transition(sta);
+  const RiseFall *open_rf = open_path_->transition(sta);
   const RiseFall *close_rf = open_rf->opposite();
-  Tag *open_tag = open_path_.tag(sta);
+  Tag *open_tag = open_path_->tag(sta);
   ClkInfo *open_clk_info = open_tag->clkInfo();
   ClkInfo close_clk_info(open_clk_info->clkEdge()->opposite(),
 			 open_clk_info->clkSrc(),
@@ -327,7 +331,7 @@ MinPulseWidthCheck::closePath(const StaState *sta,
 			 open_clk_info->pulseClkSense(),
 			 delay_zero, 0.0, nullptr,
 			 open_clk_info->pathAPIndex(),
-			 open_clk_info->crprClkPath(),
+			 open_clk_info->crprClkPath(sta),
 			 sta);
   Tag close_tag(0,
 		close_rf->index(),
@@ -339,34 +343,33 @@ MinPulseWidthCheck::closePath(const StaState *sta,
 		open_tag->states(),
 		false, sta);
   debugPrint(sta->debug(), "mpw", 3, " open  %s",
-             open_tag->asString(sta));
+             open_tag->to_string(sta).c_str());
   debugPrint(sta->debug(), "mpw", 3, " close %s",
-             close_tag.asString(sta));
-  VertexPathIterator close_iter(open_path_.vertex(sta), close_rf,
+             close_tag.to_string(sta).c_str());
+  VertexPathIterator close_iter(open_path_->vertex(sta), close_rf,
 				close_ap, sta);
   while (close_iter.hasNext()) {
-    PathVertex *close_path = close_iter.next();
+    Path *close_path = close_iter.next();
     if (tagMatchNoPathAp(close_path->tag(sta), &close_tag)) {
       debugPrint(sta->debug(), "mpw", 3, " match %s",
-                 close_path->tag(sta)->asString(sta));
-      close = close_path;
-      break;
+                 close_path->tag(sta)->to_string(sta).c_str());
+      return close_path;
     }
   }
+  return nullptr;
 }
 
 Arrival
-MinPulseWidthCheck::openArrival(const StaState *sta) const
+MinPulseWidthCheck::openArrival(const StaState *) const
 {
-  return open_path_.arrival(sta);
+  return open_path_->arrival();
 }
 
 Arrival
 MinPulseWidthCheck::closeArrival(const StaState *sta) const
 {
-  PathVertex close;
-  closePath(sta, close);
-  return close.arrival(sta);
+  Path *close = closePath(sta);
+  return close->arrival();
 }
 
 Arrival
@@ -384,13 +387,13 @@ MinPulseWidthCheck::closeDelay(const StaState *sta) const
 const ClockEdge *
 MinPulseWidthCheck::openClkEdge(const StaState *sta) const
 {
-  return open_path_.clkEdge(sta->search());
+  return open_path_->clkEdge(sta->search());
 }
 
 const ClockEdge *
 MinPulseWidthCheck::closeClkEdge(const StaState *sta) const
 {
-  Tag *open_tag = open_path_.tag(sta);
+  Tag *open_tag = open_path_->tag(sta);
   ClkInfo *open_clk_info = open_tag->clkInfo();
   return open_clk_info->clkEdge()->opposite();
 }
@@ -410,8 +413,8 @@ Arrival
 MinPulseWidthCheck::width(const StaState *sta) const
 {
   return closeArrival(sta) + closeOffset(sta)
-    - open_path_.arrival(sta)
-    + commonClkPessimism(sta);
+    - open_path_->arrival()
+    + checkCrpr(sta);
 }
 
 float
@@ -419,7 +422,7 @@ MinPulseWidthCheck::minWidth(const StaState *sta) const
 {
   float min_width;
   bool exists;
-  minPulseWidth(&open_path_, sta, min_width, exists);
+  minPulseWidth(open_path_, sta, min_width, exists);
   return min_width;
 }
 
@@ -458,13 +461,12 @@ minPulseWidth(const Path *path,
 }
 
 Crpr
-MinPulseWidthCheck::commonClkPessimism(const StaState *sta) const
+MinPulseWidthCheck::checkCrpr(const StaState *sta) const
 {
   CheckCrpr *check_crpr = sta->search()->checkCrpr();
-  PathVertex close;
-  closePath(sta, close);
-  if (!close.isNull())
-    return check_crpr->checkCrpr(openPath(), &close);
+  Path *close = closePath(sta);
+  if (close)
+    return check_crpr->checkCrpr(openPath(), close);
   else
     return 0.0;
 }
@@ -478,7 +480,7 @@ MinPulseWidthCheck::slack(const StaState *sta) const
 Corner *
 MinPulseWidthCheck::corner(const StaState *sta) const
 {
-  return open_path_.pathAnalysisPt(sta)->corner();
+  return open_path_->pathAnalysisPt(sta)->corner();
 }
 
 ////////////////////////////////////////////////////////////////

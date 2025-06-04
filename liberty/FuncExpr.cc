@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "FuncExpr.hh"
 
@@ -21,6 +29,8 @@
 #include "Network.hh"
 
 namespace sta {
+
+using std::string;
 
 FuncExpr *
 FuncExpr::makePort(LibertyPort *port)
@@ -185,34 +195,29 @@ FuncExpr::portTimingSense(const LibertyPort *port) const
   return TimingSense::unknown;
 }
 
-const char *
-FuncExpr::asString() const
+string
+FuncExpr::to_string() const
 {
-  return asString(false);
+  return to_string(false);
 }
 
-const char *
-FuncExpr::asString(bool with_parens) const
+string
+FuncExpr::to_string(bool with_parens) const
 {
   switch (op_) {
   case op_port:
     return port_->name();
   case op_not: {
-    const char *left = left_->asString(true);
-    size_t left_length = strlen(left);
-    size_t length = left_length + 2;
-    char *result = makeTmpString(length);
-    char *ptr = result;
-    *ptr++ = '!';
-    strcpy(ptr, left);
+    string result = "!";
+    result += left_->to_string(true);
     return result;
   }
   case op_or:
-    return asStringSubexpr(with_parens, '+');
+    return to_string(with_parens, '+');
   case op_and:
-    return asStringSubexpr(with_parens, '*');
+    return to_string(with_parens, '*');
   case op_xor:
-    return asStringSubexpr(with_parens, '^');
+    return to_string(with_parens, '^');
   case op_one:
     return "1";
   case op_zero:
@@ -222,25 +227,19 @@ FuncExpr::asString(bool with_parens) const
   }
 }
 
-const char *
-FuncExpr::asStringSubexpr(bool with_parens,
-			  char op) const
+string
+FuncExpr::to_string(bool with_parens,
+                    char op) const
 {
-  const char *left = left_->asString(true);
-  const char *right = right_->asString(true);
-  size_t length = strlen(left) + 1 + strlen(right) + 1;
+  string right = right_->to_string(true);
+  string result;
   if (with_parens)
-    length += 2;
-  char *result = makeTmpString(length);
-  char *r = result;
+    result += '(';
+  result += left_->to_string(true);
+  result += op;
+  result += right_->to_string(true);
   if (with_parens)
-    *r++= '(';
-  stringAppend(r, left);
-  *r++ = op;
-  stringAppend(r, right);
-  if (with_parens)
-    *r++ = ')';
-  *r = '\0';
+    result += ')';
   return result;
 }
 

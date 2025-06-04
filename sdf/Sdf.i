@@ -1,9 +1,5 @@
-%module sdf
-
-%{
-
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -17,7 +13,18 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
+%module sdf
+
+%{
 #include "sdf/SdfReader.hh"
 #include "sdf/ReportAnnotation.hh"
 #include "sdf/SdfWriter.hh"
@@ -25,7 +32,6 @@
 #include "Sta.hh"
 
 using sta::Sta;
-using sta::cmdLinkedNetwork;
 using sta::AnalysisType;
 using sta::MinMax;
 using sta::MinMaxAllNull;
@@ -52,8 +58,8 @@ read_sdf_file(const char *filename,
               bool incremental_only,
               MinMaxAllNull *cond_use)
 {
-  cmdLinkedNetwork();
   Sta *sta = Sta::sta();
+  sta->ensureLibLinked();
   sta->ensureGraph();
   if (stringEq(path, ""))
     path = NULL;
@@ -73,8 +79,8 @@ report_annotated_delay_cmd(bool report_cells,
 			   bool list_not_annotated,
 			   bool report_constant_arcs)
 {
-  cmdLinkedNetwork();
   Sta *sta = Sta::sta();
+  sta->ensureLibLinked();
   sta->ensureGraph();
   reportAnnotatedDelay(report_cells, report_nets,
 		       report_in_ports, report_out_ports,
@@ -96,8 +102,8 @@ report_annotated_check_cmd(bool report_setup,
 			   bool list_not_annotated,
 			   bool report_constant_arcs)
 {
-  cmdLinkedNetwork();
   Sta *sta = Sta::sta();
+  sta->ensureLibLinked();
   sta->ensureGraph();
   reportAnnotatedCheck(report_setup, report_hold,
 		       report_recovery, report_removal,
@@ -117,8 +123,8 @@ write_sdf_cmd(char *filename,
 	      bool no_timestamp,
 	      bool no_version)
 {
-  cmdLinkedNetwork();
   Sta *sta = Sta::sta();
+  sta->ensureLibLinked();
   sta->writeSdf(filename, corner, divider, include_typ, digits, gzip,
 		no_timestamp, no_version);
 }

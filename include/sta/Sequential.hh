@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,13 +13,50 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
+
+#include <vector>
 
 #include "LibertyClass.hh"
 #include "NetworkClass.hh"
 
 namespace sta {
+
+enum class StateInputValue {
+  low,
+  high,
+  dont_care,
+  low_high,
+  high_low,
+  rise,
+  fall,
+  not_rise,
+  not_fall
+};
+
+enum class StateInternalValue {
+  low,
+  high,
+  unspecified,
+  low_high,
+  high_low,
+  unknown,
+  hold
+};
+
+class StatetableRow;
+
+typedef std::vector<StateInputValue> StateInputValues;
+typedef std::vector<StateInternalValue> StateInternalValues;
 
 // Register/Latch
 class Sequential
@@ -63,8 +100,41 @@ protected:
   LibertyPort *output_;
   LibertyPort *output_inv_;
 
-private:
   friend class LibertyCell;
+};
+
+class Statetable
+{
+public:
+  const LibertyPortSeq &inputPorts() const { return input_ports_; }
+  const LibertyPortSeq &internalPorts() const { return internal_ports_; }
+  const StatetableRows &table() const { return table_; }
+
+protected:
+  Statetable(LibertyPortSeq &input_ports,
+             LibertyPortSeq &internal_ports,
+             StatetableRows &table);
+  LibertyPortSeq input_ports_;
+  LibertyPortSeq internal_ports_;
+  StatetableRows table_;
+
+  friend class LibertyCell;
+};
+
+class StatetableRow
+{
+public:
+  StatetableRow(StateInputValues &input_values,
+                StateInternalValues &current_values,
+                StateInternalValues &next_values);
+  const StateInputValues &inputValues() const { return input_values_; }
+  const StateInternalValues &currentValues() const { return current_values_; }
+  const StateInternalValues &nextValues() const { return next_values_; }
+
+private:
+  StateInputValues input_values_;
+  StateInternalValues current_values_;
+  StateInternalValues next_values_;
 };
 
 } // namespace

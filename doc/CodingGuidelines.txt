@@ -1,4 +1,5 @@
 Naming conventions
+------------------
 
 directory - lowercase (directory)
 filename - corresponding class name without prefix (Filename)
@@ -8,6 +9,7 @@ member variable - snake case with trailing underscore (member_variable_)
                   Trailing underscore prevents conflict with accessor 
                   member function name.
 function - lower camel case (functionName)
+variable - snake case
 comments - use capitalized sentences that end with periods
 
 C++ code files should use a .cc file extension
@@ -55,16 +57,24 @@ this:
 instead, write this:
 
      foo = (char *) malloc (sizeof *foo);
-     if (foo == 0)
+     if (foo == nullptr)
        fatal ("virtual memory exhausted");
 
 
-Use braces around if/for bodies that are more than one line.
-IE, 
+Do not use braces around if/for that are one line.
+
   if (pred)
-    for (int i = 0; i < len; i++) {  // this body should be in {}'s
+    bar = 1;
+  else
+    bar = 3;
+
+Use braces around if/for bodies that are more than one line.
+
+  if (pred) {
+    for (int i = 0; i < len; i++) {
        ...
     }
+  }
 
 Add a default clause to all switches calling switchCaseNotHandled:
 
@@ -95,41 +105,35 @@ private order.
  friend class Frobulator;
  }
 
-Don't declare class variables as const.  It means any downstream code
-that accesses the member cannot modify it, which is overly
-restrictive.
-
 Avoid using [] to lookup a map value because it creates a key/null value
 pair if the lookup fails.  Use map::find or sta::Map::findKey instead.
 
 Avoid nested classes/enums because SWIG has trouble with them.
 
-................................................................
-Warning
-get_<object> not found
-sdf timing arc not found
-disabling timing arcs to break loops
-virtual clock with no sources (no pins)
-invalid endpoint for constrained paths
-sdf DESIGN does not match top level cell name
-set_input_delay on clk port (deprecation warning)
-link cannot resolve reference (module/cell not found)
+Avoid all use of global variables as "caches", even if they are thread local.
+OpenSTA goes to great lengths to minimize global state variable that prevent
+multiple instances of the Sta class from coexisting.
 
-Errors
-cannot open file
-file syntax error
-cmd illegal command option combinations
-cmd extra positional args
-cmd unknown keyword option
-cmd unknown
-sdf pin not found
+Regression Tests
+................
 
-................................................................
-Swig notes
+Tests are run with the tcl script test/regression:
 
-C null pointers (zero) turn into "NULL" values in TCL.
+Usage: regression [-help] [-threads threads] [-valgrind] [-report_stats] tests...
+  -threads max|integer - number of threads to use
+  -valgrind - run valgrind (linux memory checker)
+  -report_stats - report run time and memory
+  Wildcarding for test names is supported (enclose in "'s)
 
-TCL "NULL" strings turn into NULL (zero) pointers in C.
+Tests log files and results are in test/results. The result/test.log
+is compared to test.ok to determine if a test passes.
 
-# TCL lexpr-funcall
-eval exec $prog $args
+Test scripts are written in tcl and live in the /test directory.
+Compress large liberty, verilog, and spef, files and use existing
+libraries to prevent repository bloat.
+
+The test script should use a one line comment at the beginning of the
+file so head -1 can show what it is for. Use file names to roughly
+group regressions and use numeric suffixes to distinguish them.
+
+The script test/save_ok saves a test/results/<test>.log to test/<test>.okfile.

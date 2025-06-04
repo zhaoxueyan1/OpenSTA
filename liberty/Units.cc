@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "Units.hh"
 
@@ -29,8 +37,7 @@ using std::abs;
 
 Unit::Unit(const char *suffix) :
   scale_(1.0),
-  suffix_(stringCopy(suffix)),
-  scaled_suffix_(nullptr),
+  suffix_(suffix),
   digits_(3)
 {
   setScaledSuffix();
@@ -40,8 +47,7 @@ Unit::Unit(float scale,
 	   const char *suffix,
 	   int digits) :
   scale_(scale),
-  suffix_(stringCopy(suffix)),
-  scaled_suffix_(nullptr),
+  suffix_(suffix),
   digits_(digits)
 {
   setScaledSuffix();
@@ -50,24 +56,15 @@ Unit::Unit(float scale,
 void
 Unit::setScaledSuffix()
 {
-  stringDelete(scaled_suffix_);
-  scaled_suffix_ = stringPrint("%s%s", scaleAbbreviation(), suffix_);
-}
-
-Unit::~Unit()
-{
-  stringDelete(suffix_);
-  stringDelete(scaled_suffix_);
+  scaled_suffix_ = scaleAbbreviation() + suffix_;
 }
 
 void
 Unit::operator=(const Unit &unit)
 {
   scale_ = unit.scale_;
-  stringDelete(suffix_);
-  suffix_ = stringCopy(unit.suffix_);
-  stringDelete(scaled_suffix_);
-  scaled_suffix_ = stringCopy(unit.scaled_suffix_);
+  suffix_ = unit.suffix_;
+  scaled_suffix_ = unit.scaled_suffix_;
   digits_ = unit.digits_;
 }
 
@@ -116,8 +113,7 @@ Unit::scaleAbbreviation() const
 void
 Unit::setSuffix(const char *suffix)
 {
-  stringDelete(suffix_);
-  suffix_ = stringCopy(suffix);
+  suffix_ = suffix;
   setScaledSuffix();
 }
 

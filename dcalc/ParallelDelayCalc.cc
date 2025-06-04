@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "ParallelDelayCalc.hh"
 
@@ -26,6 +34,8 @@
 
 namespace sta {
 
+using std::vector;
+
 ParallelDelayCalc::ParallelDelayCalc(StaState *sta):
   DelayCalcBase(sta)
 {
@@ -33,26 +43,24 @@ ParallelDelayCalc::ParallelDelayCalc(StaState *sta):
 
 ArcDcalcResultSeq
 ParallelDelayCalc::gateDelays(ArcDcalcArgSeq &dcalc_args,
-                              float load_cap,
                               const LoadPinIndexMap &load_pin_index_map,
                               const DcalcAnalysisPt *dcalc_ap)
 {
   if (dcalc_args.size() == 1) {
     ArcDcalcArg &dcalc_arg = dcalc_args[0];
     ArcDcalcResult dcalc_result =  gateDelay(dcalc_arg.drvrPin(), dcalc_arg.arc(),
-                                             dcalc_arg.inSlew(),
-                                             load_cap, dcalc_arg.parasitic(),
+                                             dcalc_arg.inSlew(), dcalc_arg.loadCap(),
+                                             dcalc_arg.parasitic(),
                                              load_pin_index_map, dcalc_ap);
     ArcDcalcResultSeq dcalc_results;
     dcalc_results.push_back(dcalc_result);
     return dcalc_results;
   }
-  return gateDelaysParallel(dcalc_args, load_cap, load_pin_index_map, dcalc_ap);
+  return gateDelaysParallel(dcalc_args, load_pin_index_map, dcalc_ap);
 }
 
 ArcDcalcResultSeq
 ParallelDelayCalc::gateDelaysParallel(ArcDcalcArgSeq &dcalc_args,
-                                      float load_cap,
                                       const LoadPinIndexMap &load_pin_index_map,
                                       const DcalcAnalysisPt *dcalc_ap)
 {
@@ -74,7 +82,7 @@ ParallelDelayCalc::gateDelaysParallel(ArcDcalcArgSeq &dcalc_args,
     ArcDelay intrinsic_delay = intrinsic_result.gateDelay();
     intrinsic_delays[drvr_idx] = intrinsic_result.gateDelay();
 
-    ArcDcalcResult gate_result = gateDelay(drvr_pin, arc, in_slew, load_cap,
+    ArcDcalcResult gate_result = gateDelay(drvr_pin, arc, in_slew, dcalc_arg.loadCap(),
                                            dcalc_arg.parasitic(),
                                            load_pin_index_map, dcalc_ap);
     ArcDelay gate_delay = gate_result.gateDelay();
@@ -88,8 +96,7 @@ ParallelDelayCalc::gateDelaysParallel(ArcDcalcArgSeq &dcalc_args,
       slew_sum += 1.0 / drvr_slew;
 
     dcalc_result.setLoadCount(load_pin_index_map.size());
-    for (auto load_pin_index : load_pin_index_map) {
-      size_t load_idx = load_pin_index.second;
+    for (const auto &[load_pin, load_idx] : load_pin_index_map) {
       dcalc_result.setWireDelay(load_idx, gate_result.wireDelay(load_idx));
       dcalc_result.setLoadSlew(load_idx, gate_result.loadSlew(load_idx));
     }

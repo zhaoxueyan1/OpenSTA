@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 // "Performance Computation for Precharacterized CMOS Gates with RC Loads",
 // Florentin Dartu, Noel Menezes and Lawrence Pileggi, IEEE Transactions
@@ -39,9 +47,11 @@
 #include "DcalcAnalysisPt.hh"
 #include "ArcDelayCalc.hh"
 #include "FindRoot.hh"
+#include "Variables.hh"
 
 namespace sta {
 
+using std::string;
 using std::abs;
 using std::min;
 using std::max;
@@ -343,7 +353,7 @@ DmpAlg::findDriverParams(double ceff)
   x_[DmpParam::dt] = dt;
   x_[DmpParam::t0] = t0;
   newtonRaphson(100, x_, nr_order_, driver_param_tol,
-                [=] () { evalDmpEqns(); },
+                [this] () { evalDmpEqns(); },
 		fvec_, fjac_, index_, p_, scale_);
   t0_ = x_[DmpParam::t0];
   dt_ = x_[DmpParam::dt];
@@ -363,7 +373,8 @@ DmpAlg::gateCapDelaySlew(double ceff,
 {
   ArcDelay model_delay;
   Slew model_slew;
-  gate_model_->gateDelay(pvt_, in_slew_, ceff, pocv_enabled_,
+  gate_model_->gateDelay(pvt_, in_slew_, ceff,
+                         variables_->pocvEnabled(),
                          model_delay, model_slew);
   delay = delayAsFloat(model_delay);
   slew = delayAsFloat(model_slew);
@@ -494,7 +505,7 @@ DmpAlg::findVoCrossing(double vth,
                        double t_lower,
                        double t_upper)
 {
-  FindRootFunc vo_func = [=] (double t,
+  FindRootFunc vo_func = [&] (double t,
                               double &y,
                               double &dy) {
     double vo, vo_dt;
@@ -612,7 +623,7 @@ DmpAlg::findVlCrossing(double vth,
                        double t_lower,
                        double t_upper)
 {
-  FindRootFunc vl_func = [=] (double t,
+  FindRootFunc vl_func = [&] (double t,
                               double &y,
                               double &dy) {
     double vl, vl_dt;
@@ -1501,7 +1512,7 @@ DmpCeffDelayCalc::gateDelay(const Pin *drvr_pin,
   const LibertyCell *drvr_cell = arc->from()->libertyCell();
   const LibertyLibrary *drvr_library = drvr_cell->libertyLibrary();
 
-  GateTableModel *table_model = gateTableModel(arc, dcalc_ap);
+  GateTableModel *table_model = arc->gateTableModel(dcalc_ap);
   if (table_model && parasitic) {
     float in_slew1 = delayAsFloat(in_slew);
     float c2, rpi, c1;
@@ -1516,9 +1527,7 @@ DmpCeffDelayCalc::gateDelay(const Pin *drvr_pin,
     dcalc_result.setGateDelay(gate_delay);
     dcalc_result.setDrvrSlew(drvr_slew);
 
-    for (auto load_pin_index : load_pin_index_map) {
-      const Pin *load_pin = load_pin_index.first;
-      size_t load_idx = load_pin_index.second;
+    for (const auto &[load_pin, load_idx] : load_pin_index_map) {
       ArcDelay wire_delay;
       Slew load_slew;
       loadDelaySlew(load_pin, drvr_slew, rf, drvr_library, parasitic,
@@ -1556,7 +1565,7 @@ DmpCeffDelayCalc::setCeffAlgorithm(const LibertyLibrary *drvr_library,
   double rd = 0.0;
   if (gate_model) {
     rd = gateModelRd(drvr_cell, gate_model, rf, in_slew, c2, c1,
-		     pvt, pocv_enabled_);
+		     pvt, variables_->pocvEnabled());
     // Zero Rd means the table is constant and thus independent of load cap.
     if (rd < 1e-2
 	// Rpi is small compared to Rd, which makes the load capacitive.
@@ -1594,17 +1603,18 @@ DmpCeffDelayCalc::reportGateDelay(const Pin *drvr_pin,
 				  const DcalcAnalysisPt *dcalc_ap,
 				  int digits)
 {
-  gateDelay(drvr_pin, arc, in_slew, load_cap, parasitic, load_pin_index_map, dcalc_ap);
-  GateTimingModel *model = gateModel(arc, dcalc_ap);
+  ArcDcalcResult dcalc_result = gateDelay(drvr_pin, arc, in_slew, load_cap,
+                                          parasitic, load_pin_index_map, dcalc_ap);
+  GateTableModel *model = arc->gateTableModel(dcalc_ap);
   float c_eff = 0.0;
   string result;
+  const LibertyCell *drvr_cell = arc->to()->libertyCell();
+  const LibertyLibrary *drvr_library = drvr_cell->libertyLibrary();
+  const Units *units = drvr_library->units();
+  const Unit *cap_unit = units->capacitanceUnit();
+  const Unit *res_unit = units->resistanceUnit();
   if (parasitic && dmp_alg_) {
     c_eff = dmp_alg_->ceff();
-    const LibertyCell *drvr_cell = arc->to()->libertyCell();
-    const LibertyLibrary *drvr_library = drvr_cell->libertyLibrary();
-    const Units *units = drvr_library->units();
-    const Unit *cap_unit = units->capacitanceUnit();
-    const Unit *res_unit = units->resistanceUnit();
     float c2, rpi, c1;
     parasitics_->piModel(parasitic, c2, rpi, c1);
     result += "Pi model C2=";
@@ -1620,9 +1630,14 @@ DmpCeffDelayCalc::reportGateDelay(const Pin *drvr_pin,
   else
     c_eff = load_cap;
   if (model) {
+    const Unit *time_unit = units->timeUnit();
     float in_slew1 = delayAsFloat(in_slew);
     result += model->reportGateDelay(pinPvt(drvr_pin, dcalc_ap), in_slew1, c_eff,
-                                     pocv_enabled_, digits);
+                                     variables_->pocvEnabled(), digits);
+    result += "Driver waveform slew = ";
+    float drvr_slew = delayAsFloat(dcalc_result.drvrSlew());
+    result += time_unit->asString(drvr_slew, digits);
+    result += '\n';
   }
   return result;
 }

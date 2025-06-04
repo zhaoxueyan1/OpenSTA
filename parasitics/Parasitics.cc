@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,11 +13,20 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "Parasitics.hh"
 
 #include "Error.hh"
 #include "Debug.hh"
+#include "Units.hh"
 #include "Liberty.hh"
 #include "Wireload.hh"
 #include "Network.hh"
@@ -32,6 +41,47 @@ namespace sta {
 Parasitics::Parasitics(StaState *sta) :
   StaState(sta)
 {
+}
+
+void
+Parasitics::report(const Parasitic *parasitic) const
+{
+  if (isParasiticNetwork(parasitic)) {
+    const Unit *cap_unit = units_->capacitanceUnit();
+    report_->reportLine("Net %s %s",
+                        network_->pathName(net(parasitic)),
+                        cap_unit->asString(capacitance(parasitic)));
+    report_->reportLine("Nodes:");
+    for (ParasiticNode *node : nodes(parasitic))
+      report_->reportLine("%s%s %s",
+                          name(node),
+                          isExternal(node) ? " (ext)" : "",
+                          cap_unit->asString(nodeGndCap(node)));
+    report_->reportLine("Resistors:");
+    for (ParasiticResistor *res : resistors(parasitic)) {
+      ParasiticNode *node1 = this->node1(res);
+      ParasiticNode *node2 = this->node2(res);
+      report_->reportLine("%zu %s%s %s%s %s",
+                          id(res),
+                          name(node1),
+                          isExternal(node1) ? " (ext)" : "",
+                          name(node2),
+                          isExternal(node2) ? " (ext)" : "",
+                          units_->resistanceUnit()->asString(value(res)));
+    }
+    report_->reportLine("Coupling Capacitors:");
+    for (ParasiticCapacitor *cap : capacitors(parasitic)) {
+      ParasiticNode *node1 = this->node1(cap);
+      ParasiticNode *node2 = this->node2(cap);
+      report_->reportLine("%zu %s%s %s%s %s",
+                          id(cap),
+                          name(node1),
+                          isExternal(node1) ? " (ext)" : "",
+                          name(node2),
+                          isExternal(node2) ? " (ext)" : "",
+                          cap_unit->asString(value(cap)));
+    }
+  }
 }
 
 const Net *
@@ -203,29 +253,32 @@ Parasitics::makeWireloadNetwork(const Pin *drvr_pin,
                                 const MinMax *min_max,
 				const ParasiticAnalysisPt *ap)
 {
+  Parasitic *parasitic = nullptr;
   const Net *net = findParasiticNet(drvr_pin);
-  Parasitic *parasitic = makeParasiticNetwork(net, false, ap);
-  const OperatingConditions *op_cond = sdc_->operatingConditions(min_max);
-  float wireload_cap, wireload_res;
-  wireload->findWireload(fanout, op_cond, wireload_cap, wireload_res);
+  if (net) {
+    parasitic = makeParasiticNetwork(net, false, ap);
+    const OperatingConditions *op_cond = sdc_->operatingConditions(min_max);
+    float wireload_cap, wireload_res;
+    wireload->findWireload(fanout, op_cond, wireload_cap, wireload_res);
 
-  WireloadTree tree = WireloadTree::balanced;
-  if (op_cond)
-    tree = op_cond->wireloadTree();
-  switch (tree) {
-  case WireloadTree::worst_case:
-    makeWireloadNetworkWorst(parasitic, drvr_pin, net, wireload_cap, 
-			     wireload_res, fanout);
-    break;
-  case WireloadTree::balanced:
-    makeWireloadNetworkBalanced(parasitic, drvr_pin, wireload_cap,
-				wireload_res, fanout);
-    break;
-  case WireloadTree::best_case:
-  case WireloadTree::unknown:
-    makeWireloadNetworkBest(parasitic, drvr_pin, wireload_cap, 
-			    wireload_res, fanout);
-    break;
+    WireloadTree tree = WireloadTree::balanced;
+    if (op_cond)
+      tree = op_cond->wireloadTree();
+    switch (tree) {
+    case WireloadTree::worst_case:
+      makeWireloadNetworkWorst(parasitic, drvr_pin, net, wireload_cap, 
+                               wireload_res, fanout);
+      break;
+    case WireloadTree::balanced:
+      makeWireloadNetworkBalanced(parasitic, drvr_pin, wireload_cap,
+                                  wireload_res, fanout);
+      break;
+    case WireloadTree::best_case:
+    case WireloadTree::unknown:
+      makeWireloadNetworkBest(parasitic, drvr_pin, wireload_cap, 
+                              wireload_res, fanout);
+      break;
+    }
   }
   return parasitic;
 }
@@ -322,6 +375,40 @@ void
 ParasiticAnalysisPt::setCouplingCapFactor(float factor)
 {
   coupling_cap_factor_ = factor;
+}
+
+////////////////////////////////////////////////////////////////
+
+ParasiticNodeLess::ParasiticNodeLess(const Parasitics *parasitics,
+                                     const Network *network) :
+  parasitics_(parasitics),
+  network_(network)
+{
+}
+
+ParasiticNodeLess::ParasiticNodeLess(const ParasiticNodeLess &less) :
+  parasitics_(less.parasitics_),
+  network_(less.network_)
+{
+}
+
+bool
+ParasiticNodeLess::operator()(const ParasiticNode *node1,
+                              const ParasiticNode *node2) const
+{
+  const Pin *pin1 = parasitics_->pin(node1);
+  const Pin *pin2 = parasitics_->pin(node2);
+  const Net *net1 = parasitics_->net(node1, network_);
+  const Net *net2 = parasitics_->net(node2, network_);
+  unsigned id1 = parasitics_->netId(node1);
+  unsigned id2 = parasitics_->netId(node2);
+  return (pin1 == nullptr && pin2)
+    || (pin1 && pin2
+        && network_->id(pin1) < network_->id(pin2))
+    || (pin1 == nullptr && pin2 == nullptr
+        && (network_->id(net1) < network_->id(net2)
+            || (net1 == net2
+                && id1 < id2)));
 }
 
 } // namespace

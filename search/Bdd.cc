@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,32 +13,21 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "Bdd.hh"
 
+#include "cudd.h"
 #include "StaConfig.hh"
 #include "Report.hh"
 #include "FuncExpr.hh"
-
-#if CUDD
-#include "cudd.h"
-#else
-#include <cstdint>
-#define CUDD_UNIQUE_SLOTS 0
-#define CUDD_CACHE_SLOTS 0
-DdManager *Cudd_Init(int, int, int, int, int) { return nullptr; }
-void Cudd_Quit(void *) {}
-DdNode *Cudd_Not(void *) { return nullptr; }
-DdNode *Cudd_bddOr(void *, void *, void *) { return nullptr; }
-DdNode *Cudd_bddAnd(void *, void *, void *) { return nullptr; }
-DdNode *Cudd_bddXor(void *, void *, void *) { return nullptr; }
-DdNode *Cudd_ReadOne(void *) { return nullptr; }
-DdNode *Cudd_ReadLogicZero(void *) { return nullptr; }
-DdNode *Cudd_bddNewVar(void *) { return nullptr; }
-int Cudd_NodeReadIndex(void *) { return 0;}
-void Cudd_Ref(void *) {}   
-void Cudd_RecursiveDeref(void *, void *) {}
-#endif
 
 namespace sta {
 
@@ -134,9 +123,9 @@ Bdd::ensureNode(const LibertyPort *port)
   auto port_var = bdd_port_var_map_.find(port);
   DdNode *node = nullptr;
   if (port_var == bdd_port_var_map_.end()) {
-    node = Cudd_bddNewVar(cudd_mgr_);
+    unsigned var_index = bdd_port_var_map_.size();
+    node = Cudd_bddIthVar(cudd_mgr_, var_index);
     bdd_port_var_map_[port] = node;
-    unsigned var_index = Cudd_NodeReadIndex(node);
     bdd_var_idx_port_map_[var_index] = port;
     Cudd_Ref(node);
   }
@@ -168,10 +157,6 @@ Bdd::varIndexPort(int var_index)
 void
 Bdd::clearVarMap()
 {
-  for (auto port_node : bdd_port_var_map_) {
-    DdNode *var_node = port_node.second;
-    Cudd_RecursiveDeref(cudd_mgr_, var_node);
-  }
   bdd_port_var_map_.clear();
   bdd_var_idx_port_map_.clear();
 }

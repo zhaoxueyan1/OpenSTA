@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,13 +13,21 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
 #include "TimingArc.hh"
 #include "GraphClass.hh"
 #include "SearchClass.hh"
-#include "PathRef.hh"
+#include "Path.hh"
 #include "StaState.hh"
 
 namespace sta {
@@ -40,33 +48,31 @@ public:
   size_t size() const { return paths_.size(); }
   // path(0) is the startpoint.
   // path(size()-1) is the endpoint.
-  PathRef *path(size_t index);
-  TimingArc *prevArc(size_t index);
+  const Path *path(size_t index) const;
   // Returns the path start point.
   //  Register/Latch Q pin
   //  Input pin
-  PathRef *startPath();
-  PathRef *startPrevPath();
-  PathRef *endPath();
-  TimingArc *startPrevArc();
+  const Path *startPath() const;
+  const Path *startPrevPath() const;
+  const Path *endPath() const;
+  const TimingArc *startPrevArc() const;
   size_t startIndex() const;
-  void clkPath(PathRef &clk_path);
+  const Path *clkPath() const;
   void latchPaths(// Return values.
-		  PathRef *&d_path,
-		  PathRef *&q_path,
-		  Edge *&d_q_edge);
+		  const Path *&d_path,
+		  const Path *&q_path,
+		  Edge *&d_q_edge) const;
 
 protected:
-  void expandGenclk(PathRef *clk_path);
+  void expandGenclk(const Path *clk_path);
   // Convert external index that starts at the path root
   // and increases to an index for paths_ (reversed).
   size_t pathsIndex(size_t index) const;
 
-  // The PathRefs in paths_ are in reverse order.
+  // The Paths in paths_ are in reverse order.
   //  paths_[0] is the endpoint.
   //  paths_[size-1] is the beginning of the path.
-  PathRefSeq paths_;
-  TimingArcSeq prev_arcs_;
+  ConstPathSeq paths_;
   // Index of the startpoint.
   size_t start_index_;
   const StaState *sta_;

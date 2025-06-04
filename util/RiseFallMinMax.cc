@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "RiseFallMinMax.hh"
 
@@ -229,7 +237,7 @@ RiseFallMinMax::hasValue(const RiseFall *rf, const MinMax *min_max) const
 void
 RiseFallMinMax::mergeWith(RiseFallMinMax *rfmm)
 {
-  for (MinMax *min_max : MinMax::range()) {
+  for (const MinMax *min_max : MinMax::range()) {
     int mm_index = min_max->index();
     for (int rf_index : RiseFall::rangeIndex()) {
       bool exists1 = exists_[rf_index][mm_index];

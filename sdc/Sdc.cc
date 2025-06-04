@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "Sdc.hh"
 
@@ -22,6 +30,7 @@
 #include "Debug.hh"
 #include "Mutex.hh"
 #include "Report.hh"
+#include "Variables.hh"
 #include "PatternMatch.hh"
 #include "MinMax.hh"
 #include "TimingRole.hh"
@@ -110,10 +119,13 @@ Sdc::Sdc(StaState *sta) :
   disabled_wire_edges_(network_),
   disabled_clk_gating_checks_inst_(network_),
   disabled_clk_gating_checks_pin_(network_),
+  exception_id_(0),
   have_thru_hpin_exceptions_(false),
   first_thru_edge_exceptions_(0, PinPairHash(network_), PinPairEqual()),
-  path_delay_internal_startpoints_(network_),
-  path_delay_internal_endpoints_(network_)
+  path_delay_internal_from_(network_),
+  path_delay_internal_from_break_(network_),
+  path_delay_internal_to_(network_),
+  path_delay_internal_to_break_(network_)
 {
   sdc_ = this;
   initVariables();
@@ -224,19 +236,6 @@ void
 Sdc::initVariables()
 {
   analysis_type_ = AnalysisType::ocv;
-  use_default_arrival_clock_ = false;
-  crpr_enabled_ = true;
-  crpr_mode_ = CrprMode::same_pin;
-  propagate_gated_clock_enable_ = true;
-  preset_clr_arcs_enabled_ = false;
-  cond_default_arcs_enabled_ = true;
-  bidirect_net_paths_enabled_ = false;
-  bidirect_inst_paths_enabled_ = false;
-  recovery_removal_checks_enabled_ = true;
-  gated_clk_checks_enabled_ = true;
-  clk_thru_tristate_enabled_ = false;
-  dynamic_loop_breaking_ = false;
-  propagate_all_clks_ = false;
   wireload_mode_ = WireloadMode::unknown;
   max_area_ = 0.0;
   path_delays_without_to_ = false;
@@ -271,15 +270,12 @@ Sdc::deleteConstraints()
   inst_min_pulse_width_map_.deleteContentsClear();
   clk_min_pulse_width_map_.deleteContentsClear();
 
-  for (auto pin_data_check : data_checks_from_map_) {
-    DataCheckSet *checks = pin_data_check.second;
+  for (auto [pin, checks] : data_checks_from_map_) {
     checks->deleteContents();
     delete checks;
   }
-  for (auto pin_data_check : data_checks_to_map_) {
-    DataCheckSet *checks = pin_data_check.second;
+  for (auto [pin, checks] : data_checks_to_map_)
     delete checks;
-  }
 
   input_delays_.deleteContents();
   input_delay_pin_map_.deleteContents();
@@ -323,9 +319,7 @@ Sdc::removeNetLoadCaps()
 void
 Sdc::removeLibertyAnnotations()
 {
-  for (auto cell_port : disabled_cell_ports_) {
-    DisabledCellPorts *disable = cell_port.second;
-    LibertyCell *cell = disable->cell();
+  for (auto [cell, disable] : disabled_cell_ports_) {
     if (disable->all())
       cell->setIsDisabledConstraint(false);
 
@@ -367,6 +361,25 @@ Sdc::deleteNetBefore(const Net *net)
     for (const Pin *pin : *network_->drivers(net))
       drvr_pin_wire_cap_maps_[corner_index].erase(pin);
   }
+}
+
+// see Sdc::isConstrained
+void
+Sdc::deleteInstanceBefore(const Instance *inst)
+{
+  instance_pvt_maps_[MinMax::minIndex()].erase(inst);
+  instance_pvt_maps_[MinMax::maxIndex()].erase(inst);
+  inst_derating_factors_.erase(inst);
+  inst_clk_gating_check_map_.erase(inst);
+  disabled_inst_ports_.erase(inst);
+  inst_latch_borrow_limit_map_.erase(inst);
+  inst_min_pulse_width_map_.erase(inst);
+
+  for (ExceptionPath *exception : exceptions_)
+    exception->deleteInstance(inst, network_);
+  first_from_inst_exceptions_.erase(inst);
+  first_thru_inst_exceptions_.erase(inst);
+  first_to_inst_exceptions_.erase(inst);
 }
 
 void
@@ -443,6 +456,57 @@ Sdc::isConstrained(const Net *net) const
 }
 
 ////////////////////////////////////////////////////////////////
+
+PortSeq
+Sdc::allInputs(bool no_clks)
+{
+  PortSeq ports;
+  Instance *top_inst = network_->topInstance();
+  InstancePinIterator *pin_iter = network_->pinIterator(top_inst);
+  while (pin_iter->hasNext()) {
+    const Pin *pin = pin_iter->next();
+    const Port *port = network_->port(pin);
+    PortDirection *dir = network_->direction(port);
+    if (dir->isAnyInput()
+        && !(no_clks && isClock(pin)))
+      portMembers(port, ports);
+  }
+  delete pin_iter;
+  return ports;
+}
+
+PortSeq
+Sdc::allOutputs()
+{
+  PortSeq ports;
+  Instance *top_inst = network_->topInstance();
+  InstancePinIterator *pin_iter = network_->pinIterator(top_inst);
+  while (pin_iter->hasNext()) {
+    const Pin *pin = pin_iter->next();
+    const Port *port = network_->port(pin);
+    PortDirection *dir = network_->direction(port);
+    if (dir->isAnyOutput())
+      portMembers(port, ports);
+  }
+  delete pin_iter;
+  return ports;
+}
+
+void
+Sdc::portMembers(const Port *port,
+                 PortSeq &ports)
+{
+  if (network_->isBus(port)) {
+    PortMemberIterator *member_iter = network_->memberIterator(port);
+    while (member_iter->hasNext()) {
+      Port *member = member_iter->next();
+      ports.push_back(member);
+    }
+    delete member_iter;
+  }
+  else
+    ports.push_back(port);
+}
 
 void
 Sdc::setAnalysisType(AnalysisType analysis_type)
@@ -945,7 +1009,7 @@ Sdc::makeClock(const char *name,
   else {
     // Fresh clock definition.
     clk = new Clock(name, clk_index_++, network_);
-    clk->setIsPropagated(propagate_all_clks_);
+    clk->setIsPropagated(variables_->propagateAllClocks());
     clocks_.push_back(clk);
     // Use the copied name in the map.
     clock_name_map_[clk->name()] = clk;
@@ -986,7 +1050,8 @@ Sdc::makeGeneratedClock(const char *name,
   clk->initGeneratedClk(pins, add_to_pins, src_pin, master_clk,
 			divide_by, multiply_by, duty_cycle,
 			invert, combinational,
-			edges, edge_shifts, propagate_all_clks_,
+			edges, edge_shifts,
+                        variables_->propagateAllClocks(),
 			comment, network_);
   makeClkPinMappings(clk);
   clearCycleAcctings();
@@ -1121,19 +1186,6 @@ Sdc::deleteMasterClkRefs(Clock *clk)
   }
 }
 
-void
-Sdc::clockDeletePin(Clock *clk,
-		    Pin *pin)
-{
-  ClockSet *pin_clks = clock_pin_map_.findKey(pin);
-  pin_clks->erase(clk);
-  if (pin_clks->empty())
-    clock_pin_map_.erase(pin);
-  clk->deletePin(pin);
-  clk->makeLeafPins(network_);
-  makeClkPinMappings(clk);
-}
-
 Clock *
 Sdc::findClock(const char *name) const
 {
@@ -1205,6 +1257,12 @@ Sdc::sortedClocks(ClockSeq &clks)
   for (auto clk : clocks_)
     clks.push_back(clk);
   sort(clks, ClkNameLess());
+}
+
+ClockEdge *
+Sdc::defaultArrivalClockEdge() const
+{
+  return default_arrival_clk_->edge(RiseFall::rise());
 }
 
 ////////////////////////////////////////////////////////////////
@@ -1906,8 +1964,8 @@ void
 Sdc::ensureClkGroupExclusions()
 {
   if (clk_group_exclusions_.empty()) {
-    for (auto name_clk_groups : clk_groups_name_map_)
-      makeClkGroupExclusions(name_clk_groups.second);
+    for (const auto [name, clk_groups] : clk_groups_name_map_)
+      makeClkGroupExclusions(clk_groups);
   }
 }
    
@@ -2020,8 +2078,7 @@ Sdc::removeClockGroupsLogicallyExclusive(const char *name)
       removeClockGroups(groups);
   }
   else {
-    for (auto name_group : clk_groups_name_map_) {
-      ClockGroups *groups = name_group.second;
+    for (const auto [name, groups] : clk_groups_name_map_) {
       if (groups->logicallyExclusive())
 	removeClockGroups(groups);
     }
@@ -2037,8 +2094,7 @@ Sdc::removeClockGroupsPhysicallyExclusive(const char *name)
       removeClockGroups(groups);
   }
   else {
-    for (auto name_group : clk_groups_name_map_) {
-      ClockGroups *groups = name_group.second;
+    for (const auto [name, groups] : clk_groups_name_map_) {
       if (groups->physicallyExclusive())
 	removeClockGroups(groups);
     }
@@ -2054,8 +2110,7 @@ Sdc::removeClockGroupsAsynchronous(const char *name)
       removeClockGroups(groups);
   }
   else {
-    for (auto name_group : clk_groups_name_map_) {
-      ClockGroups *groups = name_group.second;
+    for (const auto [name, groups] : clk_groups_name_map_) {
       if (groups->asynchronous())
 	removeClockGroups(groups);
     }
@@ -2075,10 +2130,8 @@ Sdc::removeClockGroups(ClockGroups *groups)
 void
 Sdc::clockGroupsDeleteClkRefs(Clock *clk)
 {
-  for (auto name_group : clk_groups_name_map_) {
-    ClockGroups *groups = name_group.second;
+  for (const auto [name, groups] : clk_groups_name_map_)
     groups->removeClock(clk);
-  }
   clearClkGroupExclusions();
 }
 
@@ -3015,14 +3068,18 @@ Sdc::drvrPinWireCap(const Pin *pin,
 		    const MinMax *min_max,
 		    // Return values.
 		    float &cap,
-		    bool &exists) const
+		    bool &exists,
+                    bool &subtract_pin_cap) const
 {
-  MinMaxFloatValues *values = drvr_pin_wire_cap_maps_[corner->index()].findKey(pin);
-  if (values)
-    values->value(min_max, cap, exists);
+  NetWireCaps *net_caps = drvr_pin_wire_cap_maps_[corner->index()].findKey(pin);
+  if (net_caps) {
+    net_caps->value(min_max, cap, exists);
+    subtract_pin_cap = net_caps->subtractPinCap(min_max);
+  }
   else {
     cap = 0.0;
     exists = false;
+    subtract_pin_cap = false;
   }
 }
 
@@ -3031,27 +3088,15 @@ Sdc::setNetWireCap(const Net *net,
 		   bool subtract_pin_cap,
 		   const Corner *corner,
 		   const MinMax *min_max,
-		   float cap)
+		   float wire_cap)
 {
-  float wire_cap = cap;
-  if (subtract_pin_cap) {
-    NetConnectedPinIterator *pin_iter = network_->connectedPinIterator(net);
-    if (pin_iter->hasNext()) {
-      const Pin *pin = pin_iter->next();
-      float pin_cap_rise = connectedPinCap(pin, RiseFall::rise(), corner, min_max);
-      float pin_cap_fall = connectedPinCap(pin, RiseFall::fall(), corner, min_max);
-      float pin_cap = (pin_cap_rise + pin_cap_fall) / 2.0F;
-      wire_cap -= pin_cap;
-      if ((wire_cap + pin_cap) < 0.0)
-	wire_cap = -pin_cap;
-      delete pin_iter;
-    }
-  }
-  MinMaxFloatValues &values = net_wire_cap_maps_[corner->index()][net];
-  values.setValue(min_max, wire_cap);
+  NetWireCaps &net_caps = net_wire_cap_maps_[corner->index()][net];
+  net_caps.setValue(min_max, wire_cap);
+  net_caps.setSubtractPinCap(subtract_pin_cap, min_max);
+
 
   for (const Pin *pin : *network_->drivers(net))
-    drvr_pin_wire_cap_maps_[corner->index()][pin] = &values;
+    drvr_pin_wire_cap_maps_[corner->index()][pin] = &net_caps;
 }
 
 bool
@@ -3079,7 +3124,10 @@ Sdc::connectedCap(const Pin *pin,
 {
   netCaps(pin, rf, corner, min_max, pin_cap, wire_cap, fanout, has_net_load);
   float net_wire_cap;
-  drvrPinWireCap(pin, corner, min_max, net_wire_cap, has_net_load);
+  bool subtract_pin_cap;
+  drvrPinWireCap(pin, corner, min_max, net_wire_cap, has_net_load, subtract_pin_cap);
+  if (subtract_pin_cap)
+    pin_cap = 0.0;
   if (has_net_load)
     wire_cap += net_wire_cap;
 }
@@ -3804,7 +3852,7 @@ Sdc::exceptionToInvalid(const Pin *pin)
   if (port) {
     LibertyCell *cell = port->libertyCell();
     for (TimingArcSet *arc_set : cell->timingArcSets(nullptr, port)) {
-      TimingRole *role = arc_set->role();
+      const TimingRole *role = arc_set->role();
       if (role->genericRole() == TimingRole::regClkToQ())
 	return true;
     }
@@ -3848,18 +3896,19 @@ Sdc::makePathDelay(ExceptionFrom *from,
 		   ExceptionTo *to,
 		   const MinMax *min_max,
 		   bool ignore_clk_latency,
+                   bool break_path,
 		   float delay,
 		   const char *comment)
 {
   checkFromThrusTo(from, thrus, to);
   PathDelay *exception = new PathDelay(from, thrus, to, min_max, 
-				       ignore_clk_latency, delay, true,
-				       comment);
+				       ignore_clk_latency, break_path,
+                                       delay, true, comment);
   addException(exception);
 }
 
 void
-Sdc::recordPathDelayInternalStartpoints(ExceptionPath *exception)
+Sdc::recordPathDelayInternalFrom(ExceptionPath *exception)
 {
   ExceptionFrom *from = exception->from();
   if (from
@@ -3867,23 +3916,29 @@ Sdc::recordPathDelayInternalStartpoints(ExceptionPath *exception)
     for (const Pin *pin : *from->pins()) {
       if (!(network_->isRegClkPin(pin)
 	    || network_->isTopLevelPort(pin))) {
-	path_delay_internal_startpoints_.insert(pin);
+	path_delay_internal_from_.insert(pin);
+        if (exception->breakPath())
+          path_delay_internal_from_break_.insert(pin);
       }
     }
   }
 }
 
 void
-Sdc::unrecordPathDelayInternalStartpoints(ExceptionFrom *from)
+Sdc::unrecordPathDelayInternalFrom(ExceptionPath *exception)
 {
+  ExceptionFrom *from = exception->from();
   if (from
       && from->hasPins()
-      && !path_delay_internal_startpoints_.empty()) {
+      && !path_delay_internal_from_.empty()) {
     for (const Pin *pin : *from->pins()) {
       if (!(network_->isRegClkPin(pin)
 	    || network_->isTopLevelPort(pin))
-	  && !pathDelayFrom(pin))
-	path_delay_internal_startpoints_.erase(pin);
+	  && !pathDelayFrom(pin)) {
+	path_delay_internal_from_.erase(pin);
+        if (exception->breakPath())
+          path_delay_internal_from_break_.erase(pin);
+      }
     }
   }
 }
@@ -3900,19 +3955,25 @@ Sdc::pathDelayFrom(const Pin *pin)
 }
 
 bool
-Sdc::isPathDelayInternalStartpoint(const Pin *pin) const
+Sdc::isPathDelayInternalFrom(const Pin *pin) const
 {
-  return path_delay_internal_startpoints_.hasKey(pin);
+  return path_delay_internal_from_.hasKey(pin);
+}
+
+bool
+Sdc::isPathDelayInternalFromBreak(const Pin *pin) const
+{
+  return path_delay_internal_from_break_.hasKey(pin);
 }
 
 const PinSet &
-Sdc::pathDelayInternalStartpoints() const
+Sdc::pathDelayInternalFrom() const
 {
-  return path_delay_internal_startpoints_;
+  return path_delay_internal_from_;
 }
 
 void
-Sdc::recordPathDelayInternalEndpoints(ExceptionPath *exception)
+Sdc::recordPathDelayInternalTo(ExceptionPath *exception)
 {
   ExceptionTo *to = exception->to();
   if (to
@@ -3920,24 +3981,29 @@ Sdc::recordPathDelayInternalEndpoints(ExceptionPath *exception)
     for (const Pin *pin : *to->pins()) {
       if (!(hasLibertyCheckTo(pin)
 	    || network_->isTopLevelPort(pin))) {
-	path_delay_internal_endpoints_.insert(pin);
+	path_delay_internal_to_.insert(pin);
+        if (exception->breakPath())
+          path_delay_internal_to_break_.insert(pin);
       }
     }
   }
 }
 
 void
-Sdc::unrecordPathDelayInternalEndpoints(ExceptionPath *exception)
+Sdc::unrecordPathDelayInternalTo(ExceptionPath *exception)
 {
   ExceptionTo *to = exception->to();
   if (to
       && to->hasPins()
-      && !path_delay_internal_endpoints_.empty()) {
+      && !path_delay_internal_to_.empty()) {
     for (const Pin *pin : *to->pins()) {
       if (!(hasLibertyCheckTo(pin)
 	    || network_->isTopLevelPort(pin))
-	  && !pathDelayTo(pin))
-	path_delay_internal_endpoints_.erase(pin);
+	  && !pathDelayTo(pin)) {
+	path_delay_internal_to_.erase(pin);
+        if (exception->breakPath())
+          path_delay_internal_to_break_.erase(pin);
+      }
     }
   }
 }
@@ -3971,9 +4037,15 @@ Sdc::pathDelayTo(const Pin *pin)
 }
 
 bool
-Sdc::isPathDelayInternalEndpoint(const Pin *pin) const
+Sdc::isPathDelayInternalTo(const Pin *pin) const
 {
-  return path_delay_internal_endpoints_.hasKey(pin);
+  return path_delay_internal_to_.hasKey(pin);
+}
+
+bool
+Sdc::isPathDelayInternalToBreak(const Pin *pin) const
+{
+  return path_delay_internal_to_break_.hasKey(pin);
 }
 
 ////////////////////////////////////////////////////////////////
@@ -3983,9 +4055,7 @@ Sdc::clearGroupPathMap()
 {
   // GroupPath exceptions are deleted with other exceptions.
   // Delete group_path name strings.
-  for (auto name_groups : group_path_map_) {
-    const char *name = name_groups.first;
-    GroupPathSet *groups = name_groups.second;
+  for (auto [name, groups] : group_path_map_) {
     stringDelete(name);
     groups->deleteContents();
     delete groups;
@@ -4061,7 +4131,7 @@ Sdc::makeFilterPath(ExceptionFrom *from,
 void
 Sdc::makeLoopExceptions()
 {
-  for (GraphLoop *loop : *levelize_->loops()) 
+  for (GraphLoop *loop : levelize_->loops())
     makeLoopExceptions(loop);
 }
 
@@ -4143,8 +4213,8 @@ Sdc::addException(ExceptionPath *exception)
              exception->asString(network_));
 
   if (exception->isPathDelay()) {
-    recordPathDelayInternalStartpoints(exception);
-    recordPathDelayInternalEndpoints(exception);
+    recordPathDelayInternalFrom(exception);
+    recordPathDelayInternalTo(exception);
     if (exception->to() == nullptr)
       path_delays_without_to_ = true;
   }
@@ -4331,7 +4401,8 @@ Sdc::findMatchingExceptionsFirstThru(ExceptionPath *exception,
   findMatchingExceptionsInsts(exception, thru->instances(),
 			      first_thru_inst_exceptions_,
 			      matches);
-  if (!first_thru_net_exceptions_.empty()) {
+  if (!first_thru_net_exceptions_.empty()
+      && thru->nets()) {
     for (const Net *net : *thru->nets()) {
       // Potential matches includes exceptions that match net that are not
       // the first exception point.
@@ -4513,6 +4584,7 @@ void
 Sdc::recordException(ExceptionPath *exception)
 {
   exceptions_.insert(exception);
+  exception->setId(++exception_id_);
   recordMergeHashes(exception);
   recordExceptionFirstPts(exception);
   checkForThruHpins(exception);
@@ -4774,6 +4846,7 @@ void
 Sdc::deleteExceptions()
 {
   exceptions_.deleteContentsClear();
+  exception_id_ = 0;
 
   first_from_pin_exceptions_.deleteContentsClear();
   first_from_clk_exceptions_.deleteContentsClear();
@@ -4786,8 +4859,10 @@ Sdc::deleteExceptions()
   first_thru_net_exceptions_.deleteContentsClear();
   first_thru_edge_exceptions_.deleteContentsClear();
   first_thru_edge_exceptions_.clear();
-  path_delay_internal_startpoints_.clear();
-  path_delay_internal_endpoints_.clear();
+  path_delay_internal_from_.clear();
+  path_delay_internal_from_break_.clear();
+  path_delay_internal_to_.clear();
+  path_delay_internal_to_break_.clear();
 
   deleteExceptionPtHashMapSets(exception_merge_hash_);
   exception_merge_hash_.clear();
@@ -5069,8 +5144,8 @@ Sdc::resetPath(ExceptionFrom *from,
       while (expand_iter.hasNext()) {
 	ExceptionPath *expand = expand_iter.next();
 	if (expand->resetMatch(from, thrus, to, min_max, network_)) {
-	  unrecordPathDelayInternalStartpoints(expand->from());
-	  unrecordPathDelayInternalEndpoints(expand);
+	  unrecordPathDelayInternalFrom(expand);
+	  unrecordPathDelayInternalTo(expand);
 	  delete expand;
 	}
 	else
@@ -5164,7 +5239,7 @@ Sdc::exceptionFromStates(const ExceptionPathSet *exceptions,
 	  // but flush all other exception states because they are lower
 	  // priority.
 	  if (states == nullptr)
-	    states = new ExceptionStateSet(network_);
+	    states = new ExceptionStateSet();
 	  states->clear();
 	  states->insert(state);
 	  // No need to examine other exceptions from this
@@ -5172,7 +5247,7 @@ Sdc::exceptionFromStates(const ExceptionPathSet *exceptions,
 	  return false;
 	}
 	if (states == nullptr)
-	  states = new ExceptionStateSet(network_);
+	  states = new ExceptionStateSet();
 	states->insert(state);
       }
     }
@@ -5197,6 +5272,8 @@ Sdc::exceptionFromClkStates(const Pin *pin,
       exceptionFromStates(first_from_inst_exceptions_.findKey(inst),
 			  pin, rf, min_max, true, states);
     }
+    exceptionThruStates(first_thru_pin_exceptions_.findKey(pin),
+                        rf, min_max, states);
   }
   if (!first_from_clk_exceptions_.empty())
     exceptionFromStates(first_from_clk_exceptions_.findKey(clk),
@@ -5219,7 +5296,7 @@ Sdc::filterRegQStates(const Pin *to_pin,
 	    && exception->matchesFirstPt(to_rf, min_max)) {
 	  ExceptionState *state = exception->firstState();
 	  if (states == nullptr)
-	    states = new ExceptionStateSet(network_);
+	    states = new ExceptionStateSet();
 	  states->insert(state);
 	}
       }
@@ -5263,7 +5340,7 @@ Sdc::exceptionThruStates(const ExceptionPathSet *exceptions,
       if (exception->matchesFirstPt(to_rf, min_max)) {
 	ExceptionState *state = exception->firstState();
 	if (states == nullptr)
-	  states = new ExceptionStateSet(network_);
+	  states = new ExceptionStateSet();
 	states->insert(state);
       }
     }
@@ -5446,203 +5523,6 @@ Sdc::setWireloadSelection(WireloadSelection *selection,
 
 ////////////////////////////////////////////////////////////////
 
-bool
-Sdc::crprEnabled() const
-{
-  return crpr_enabled_;
-}
-
-void
-Sdc::setCrprEnabled(bool enabled)
-{
-  crpr_enabled_ = enabled;
-}
-
-CrprMode
-Sdc::crprMode() const
-{
-  return crpr_mode_;
-}
-
-void
-Sdc::setCrprMode(CrprMode mode)
-{
-  crpr_mode_ = mode;
-}
-
-bool
-Sdc::crprActive() const
-{
-  return analysis_type_ == AnalysisType::ocv
-    && crpr_enabled_;
-}
-
-bool
-Sdc::propagateGatedClockEnable() const
-{
-  return propagate_gated_clock_enable_;
-}
-
-void
-Sdc::setPropagateGatedClockEnable(bool enable)
-{
-  propagate_gated_clock_enable_ = enable;
-}
-
-bool
-Sdc::presetClrArcsEnabled() const
-{
-  return preset_clr_arcs_enabled_;
-}
-
-void
-Sdc::setPresetClrArcsEnabled(bool enable)
-{
-  preset_clr_arcs_enabled_ = enable;
-}
-
-bool
-Sdc::condDefaultArcsEnabled() const
-{
-  return cond_default_arcs_enabled_;
-}
-
-void
-Sdc::setCondDefaultArcsEnabled(bool enabled)
-{
-  cond_default_arcs_enabled_ = enabled;
-}
-
-bool
-Sdc::isDisabledCondDefault(Edge *edge) const
-{
-  return !cond_default_arcs_enabled_
-    && edge->timingArcSet()->isCondDefault();
-}
-
-bool
-Sdc::bidirectInstPathsEnabled() const
-{
-  return bidirect_inst_paths_enabled_;
-}
-
-void
-Sdc::setBidirectInstPathsEnabled(bool enabled)
-{
-  bidirect_inst_paths_enabled_ = enabled;
-}
-
-// Delay calculation propagates slews from a bidirect driver
-// to the bidirect port and back through the bidirect driver when
-// sta_bidirect_inst_paths_enabled_ is true.
-bool
-Sdc::bidirectDrvrSlewFromLoad(const Pin *pin) const
-{
-  return bidirect_inst_paths_enabled_
-    && network_->direction(pin)->isBidirect()
-    && network_->isTopLevelPort(pin);
-}
-
-bool
-Sdc::bidirectNetPathsEnabled() const
-{
-  return bidirect_inst_paths_enabled_;
-}
-
-void
-Sdc::setBidirectNetPathsEnabled(bool enabled)
-{
-  bidirect_inst_paths_enabled_ = enabled;
-}
-
-bool
-Sdc::recoveryRemovalChecksEnabled() const
-{
-  return recovery_removal_checks_enabled_;
-}
-
-void
-Sdc::setRecoveryRemovalChecksEnabled(bool enabled)
-{
-  recovery_removal_checks_enabled_ = enabled;
-}
-
-bool
-Sdc::gatedClkChecksEnabled() const
-{
-  return gated_clk_checks_enabled_;
-}
-
-void
-Sdc::setGatedClkChecksEnabled(bool enabled)
-{
-  gated_clk_checks_enabled_ = enabled;
-}
-
-bool
-Sdc::dynamicLoopBreaking() const
-{
-  return dynamic_loop_breaking_;
-}
-
-void
-Sdc::setDynamicLoopBreaking(bool enable)
-{
-  if (dynamic_loop_breaking_ != enable) {
-    if (levelize_->levelized()) {
-      if (enable)
-	makeLoopExceptions();
-      else
-	deleteLoopExceptions();
-    }
-    dynamic_loop_breaking_ = enable;
-  }
-}
-
-bool
-Sdc::propagateAllClocks() const
-{
-  return propagate_all_clks_;
-}
-
-void
-Sdc::setPropagateAllClocks(bool prop)
-{
-  propagate_all_clks_ = prop;
-}
-
-bool
-Sdc::clkThruTristateEnabled() const
-{
-  return clk_thru_tristate_enabled_;
-}
-
-void
-Sdc::setClkThruTristateEnabled(bool enable)
-{
-  clk_thru_tristate_enabled_ = enable;
-}
-
-ClockEdge *
-Sdc::defaultArrivalClockEdge() const
-{
-  return default_arrival_clk_->edge(RiseFall::rise());
-}
-
-bool
-Sdc::useDefaultArrivalClock()
-{
-  return use_default_arrival_clock_;
-}
-
-void
-Sdc::setUseDefaultArrivalClock(bool enable)
-{
-  use_default_arrival_clock_ = enable;
-}
-
-////////////////////////////////////////////////////////////////
-
 void
 Sdc::connectPinAfter(const Pin *pin)
 {
@@ -5753,6 +5633,26 @@ findLeafDriverPins(const Pin *pin,
   }
   else
     leaf_pins->insert(pin);
+}
+
+////////////////////////////////////////////////////////////////
+
+NetWireCaps::NetWireCaps() :
+  subtract_pin_cap_{false, false}
+{
+}
+
+bool
+NetWireCaps::subtractPinCap(const MinMax *min_max)
+{
+  return subtract_pin_cap_[min_max->index()];
+}
+
+void
+NetWireCaps::setSubtractPinCap(bool subtrace_pin_cap,
+                               const MinMax *min_max)
+{
+  subtract_pin_cap_[min_max->index()] = subtrace_pin_cap;
 }
 
 } // namespace

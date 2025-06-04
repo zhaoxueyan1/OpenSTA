@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -52,6 +60,7 @@ public:
   int index() const { return index_; }
   bool isPropagated() const { return is_propagated_; }
   void setIsPropagated(bool propagated);
+  bool isIdeal() const { return !is_propagated_; }
   // Ideal clock slew.
   void slew(const RiseFall *rf,
 	    const MinMax *min_max,
@@ -194,7 +203,7 @@ class ClockEdge
 public:
   Clock *clock() const { return clock_; }
   ~ClockEdge();
-  RiseFall *transition() const { return rf_; }
+  const RiseFall *transition() const { return rf_; }
   float time() const { return time_; }
   const char *name() const { return name_; }
   int index() const { return index_; }
@@ -204,11 +213,12 @@ public:
 
   friend class Clock;  // builder
 private:
-  ClockEdge(Clock *clock, RiseFall *rf);
+  ClockEdge(Clock *clock,
+            const RiseFall *rf);
   void setTime(float time);
 
   Clock *clock_;
-  RiseFall *rf_;
+  const RiseFall *rf_;
   const char *name_;
   float time_;
   int index_;
@@ -253,7 +263,7 @@ public:
   void removeUncertainty(const RiseFallBoth *src_rf,
 			 const RiseFallBoth *tgt_rf,
 			 const SetupHoldAll *setup_hold);
-  const RiseFallMinMax *uncertainties(RiseFall *src_rf) const;
+  const RiseFallMinMax *uncertainties(const RiseFall *src_rf) const;
   bool empty() const;
 
 private:

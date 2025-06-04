@@ -1,5 +1,5 @@
 # OpenSTA, Static Timing Analyzer
-# Copyright (c) 2024, Parallax Software, Inc.
+# Copyright (c) 2025, Parallax Software, Inc.
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,8 +13,16 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
+# 
+# The origin of this software must not be misrepresented; you must not
+# claim that you wrote the original software.
+# 
+# Altered source versions must be plainly marked as such, and must not be
+# misrepresented as being the original software.
+# 
+# This notice may not be removed or altered from any source distribution.
 
-cmake_minimum_required (VERSION 3.9)
+cmake_minimum_required (VERSION 3.10)
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.13)
 # Use standard target names
 cmake_policy(SET CMP0078 NEW)
@@ -24,14 +32,13 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.14)
 cmake_policy(SET CMP0086 NEW)
 endif()
 
-project(STA VERSION 2.5.0
+project(STA VERSION 2.7.0
   LANGUAGES CXX
 )
 
-option(USE_CUDD "Use CUDD BDD package")
 option(CUDD_DIR "CUDD BDD package directory")
-option(USE_TCL_READLINE "Use TCL readliine package")
-option(USE_SANITIZE "Compile with santize address enabled")
+option(USE_TCL_READLINE "Use TCL readline package" ON)
+option(ENABLE_TSAN "Compile with thread santizer enabled" OFF)
 
 # Turn on to debug compiler args.
 set(CMAKE_VERBOSE_MAKEFILE OFF)
@@ -69,7 +76,6 @@ set(STA_SOURCE
   dcalc/ArnoldiDelayCalc.cc
   dcalc/ArnoldiReduce.cc
   dcalc/CcsCeffDelayCalc.cc
-  dcalc/CcsSimDelayCalc.cc
   dcalc/DcalcAnalysisPt.cc
   dcalc/DelayCalc.cc
   dcalc/DelayCalcBase.cc
@@ -95,8 +101,7 @@ set(STA_SOURCE
   liberty/LeakagePower.cc
   liberty/Liberty.cc
   liberty/LibertyBuilder.cc
-  liberty/LibertyExpr.cc
-  liberty/LibertyExprPvt.hh
+  liberty/LibExprReader.cc
   liberty/LibertyParser.cc
   liberty/LibertyReader.cc
   liberty/LibertyWriter.cc
@@ -127,6 +132,11 @@ set(STA_SOURCE
   parasitics/SpefNamespace.cc
   parasitics/SpefReader.cc
   parasitics/SpefReaderPvt.hh
+
+  power/Power.cc
+  power/VcdReader.cc
+  power/SaifReader.cc
+  power/VcdParse.cc
   
   sdc/Clock.cc
   sdc/ClockGatingCheck.cc
@@ -145,6 +155,7 @@ set(STA_SOURCE
   sdc/Sdc.cc
   sdc/SdcGraph.cc
   sdc/SdcCmdComment.cc
+  sdc/Variables.cc
   sdc/WriteSdc.cc
   
   sdf/ReportAnnotation.cc
@@ -174,14 +185,11 @@ set(STA_SOURCE
   search/MakeTimingModel.cc
   search/Path.cc
   search/PathAnalysisPt.cc
+  search/Path.cc
   search/PathEnd.cc
   search/PathEnum.cc
-  search/PathEnumed.cc
   search/PathExpanded.cc
   search/PathGroup.cc
-  search/PathRef.cc
-  search/PathVertex.cc
-  search/PathVertexRep.cc
   search/Property.cc
   search/ReportPath.cc
   search/Search.cc
@@ -195,13 +203,12 @@ set(STA_SOURCE
   search/VisitPathEnds.cc
   search/VisitPathGroupVertices.cc
   search/WorstSlack.cc
-  search/WritePathSpice.cc
-  search/WriteSpice.cc
 
-  power/Power.cc
-  power/ReadVcdActivities.cc
-  power/Vcd.cc
-  power/VcdReader.cc
+  spice/WritePathSpice.cc
+  spice/WriteSpice.cc
+  spice/Xyce.cc
+
+  tcl/TclTypeHelpers.cc
 
   util/Debug.cc
   util/DispatchQueue.cc
@@ -233,22 +240,22 @@ set(STA_TCL_FILES
   tcl/Util.tcl
   tcl/CmdArgs.tcl
   tcl/CmdUtil.tcl
-  tcl/Graph.tcl
-  tcl/Liberty.tcl
-  tcl/Link.tcl
-  tcl/Network.tcl
-  tcl/NetworkEdit.tcl
   tcl/Property.tcl
-  tcl/Sdc.tcl
-  tcl/Search.tcl
   tcl/Sta.tcl
   tcl/Splash.tcl
   tcl/Variables.tcl
-  tcl/WritePathSpice.tcl
   dcalc/DelayCalc.tcl
+  graph/Graph.tcl
+  liberty/Liberty.tcl
+  network/Link.tcl
+  network/Network.tcl
+  network/NetworkEdit.tcl
   parasitics/Parasitics.tcl
   power/Power.tcl
+  sdc/Sdc.tcl
   sdf/Sdf.tcl
+  search/Search.tcl
+  spice/WriteSpice.tcl
   verilog/Verilog.tcl
   )
 
@@ -258,56 +265,52 @@ set(STA_TCL_FILES
 #
 ################################################################
 
-# Earlier versions of flex use 'register' declarations that are deprecated
-# in c++11 and illegal in c++17.
+# Earlier versions of flex use 'register' declarations that are illegal in c++17.
 #find_package(FLEX 2.6.4)
 find_package(FLEX)
-find_package(BISON)
-
-# LibertyExpr scan/parse.
-flex_target(LibertyExprLex ${STA_HOME}/liberty/LibertyExprLex.ll ${CMAKE_CURRENT_BINARY_DIR}/LibertyExprLex.cc
-  COMPILE_FLAGS --prefix=LibertyExprLex_)
-bison_target(LibertyExprParser ${STA_HOME}/liberty/LibertyExprParse.yy ${CMAKE_CURRENT_BINARY_DIR}/LibertyExprParse.cc
-  COMPILE_FLAGS --name-prefix=LibertyExprParse_
-  )
-add_flex_bison_dependency(LibertyExprLex LibertyExprParser)
-
-# Liberty scan/parse.
-flex_target(LibertyLex ${STA_HOME}/liberty/LibertyLex.ll ${CMAKE_CURRENT_BINARY_DIR}/LibertyLex.cc
-  COMPILE_FLAGS --prefix=LibertyLex_
-  )
-bison_target(LibertyParser ${STA_HOME}/liberty/LibertyParse.yy ${CMAKE_CURRENT_BINARY_DIR}/LibertyParse.cc
-  COMPILE_FLAGS "--name-prefix=LibertyParse_ -v"
-  )
-add_flex_bison_dependency(LibertyLex LibertyParser)
-
-# Spef scan/parse.
-flex_target(SpefLex ${STA_HOME}/parasitics/SpefLex.ll ${CMAKE_CURRENT_BINARY_DIR}/SpefLex.cc
-  COMPILE_FLAGS --prefix=SpefLex_
-  )
-bison_target(SpefParser ${STA_HOME}/parasitics/SpefParse.yy ${CMAKE_CURRENT_BINARY_DIR}/SpefParse.cc
-  COMPILE_FLAGS --name-prefix=SpefParse_
-  )
-add_flex_bison_dependency(SpefLex SpefParser)
+find_package(BISON REQUIRED 3.2)
 
 # Verilog scan/parse.
-flex_target(VerilogLex ${STA_HOME}/verilog/VerilogLex.ll ${CMAKE_CURRENT_BINARY_DIR}/VerilogLex.cc
-  COMPILE_FLAGS --prefix=VerilogLex_
-  )
-bison_target(VerilogParser ${STA_HOME}/verilog/VerilogParse.yy ${CMAKE_CURRENT_BINARY_DIR}/VerilogParse.cc
-  COMPILE_FLAGS --name-prefix=VerilogParse_
-  )
-add_flex_bison_dependency(VerilogLex VerilogParser)
+flex_target(VerilogLex ${STA_HOME}/verilog/VerilogLex.ll
+  ${CMAKE_CURRENT_BINARY_DIR}/VerilogLex.cc)
+bison_target(VerilogParse ${STA_HOME}/verilog/VerilogParse.yy
+  ${CMAKE_CURRENT_BINARY_DIR}/VerilogParse.cc)
+add_flex_bison_dependency(VerilogLex VerilogParse)
+
+# Liberty scan/parse.
+flex_target(LibertyLex ${STA_HOME}/liberty/LibertyLex.ll
+  ${CMAKE_CURRENT_BINARY_DIR}/LibertyLex.cc)
+bison_target(LibertyParse ${STA_HOME}/liberty/LibertyParse.yy
+  ${CMAKE_CURRENT_BINARY_DIR}/LibertyParse.cc)
+add_flex_bison_dependency(LibertyLex LibertyParse)
+
+# Liberty Expr scan/parse.
+flex_target(LibExprLex ${STA_HOME}/liberty/LibExprLex.ll
+  ${CMAKE_CURRENT_BINARY_DIR}/LibExprLex.cc)
+bison_target(LibExprParse ${STA_HOME}/liberty/LibExprParse.yy
+  ${CMAKE_CURRENT_BINARY_DIR}/LibExprParse.cc)
+add_flex_bison_dependency(LibExprLex LibExprParse)
 
 # Sdf scan/parse.
-flex_target(SdfLex ${STA_HOME}/sdf/SdfLex.ll ${CMAKE_CURRENT_BINARY_DIR}/SdfLex.cc
-  COMPILE_FLAGS --prefix=SdfLex_
-  )
-bison_target(SdfParser ${STA_HOME}/sdf/SdfParse.yy ${CMAKE_CURRENT_BINARY_DIR}/SdfParse.cc
-  COMPILE_FLAGS --name-prefix=SdfParse_
-  )
-add_flex_bison_dependency(SdfLex SdfParser)
+flex_target(SdfLex ${STA_HOME}/sdf/SdfLex.ll
+  ${CMAKE_CURRENT_BINARY_DIR}/SdfLex.cc)
+bison_target(SdfParse ${STA_HOME}/sdf/SdfParse.yy
+  ${CMAKE_CURRENT_BINARY_DIR}/SdfParse.cc)
+add_flex_bison_dependency(SdfLex SdfParse)
 
+# Spef scan/parse.
+flex_target(SpefLex ${STA_HOME}/parasitics/SpefLex.ll
+  ${CMAKE_CURRENT_BINARY_DIR}/SpefLex.cc)
+bison_target(SpefParse ${STA_HOME}/parasitics/SpefParse.yy
+  ${CMAKE_CURRENT_BINARY_DIR}/SpefParse.cc)
+add_flex_bison_dependency(SpefLex SpefParse)
+
+# Saif scan/parse.
+flex_target(SaifLex ${STA_HOME}/power/SaifLex.ll
+  ${CMAKE_CURRENT_BINARY_DIR}/SaifLex.cc)
+bison_target(SaifParse ${STA_HOME}/power/SaifParse.yy
+  ${CMAKE_CURRENT_BINARY_DIR}/SaifParse.cc)
+add_flex_bison_dependency(SaifLex SaifParse)
 
 ################################################################
 
@@ -337,26 +340,36 @@ add_custom_command(OUTPUT ${STA_TCL_INIT}
 # Do not use REQUIRED because it also requires TK, which is not used by OpenSTA.
 find_package(TCL)
 
+# Referenced by util/StaConfig.hh.cmake
 set(TCL_READLINE 0)
 # check for tclReadline
 if (USE_TCL_READLINE)
-  find_library(TCL_READLINE_LIBRARY tclreadline)
+  set(TCL_READLINE_POSSIBLE_NAMES
+    tclreadline-2.1.0
+    tclreadline-2.3.2
+    tclreadline-2.3.6
+    tclreadline-2.3.7
+    tclreadline-2.3.8
+    )
+  find_library(TCL_READLINE_LIBRARY
+    NAMES tclreadline ${TCL_READLINE_POSSIBLE_NAMES}
+    PATHS ${TCL_LIB_PATHS}
+    )
   if (TCL_READLINE_LIBRARY)
-    message(STATUS "TCL readline: ${TCL_READLINE_LIBRARY}")
-    # Referenced by StaConfig.hh.cmake
-    set(TCL_READLINE 1)
-
-    get_filename_component(TCL_READLINE_LIB_DIR "${TCL_READLINE_LIBRARY}" PATH)
-    get_filename_component(TCL_READLINE_LIB_PARENT "${TCL_READLINE_LIB_DIR}" PATH)
-    find_file(TCL_READLINE_HEADER tclreadline.h
-      PATHS ${TCL_READLINE_LIB_PARENT}
-      PATH_SUFFIXES include
-      NO_DEFAULT_PATH
-      )
-    message(STATUS "TCL readline header: ${TCL_READLINE_HEADER}")
-    get_filename_component(TCL_READLINE_INCLUDE "${TCL_READLINE_HEADER}" PATH)
+    message(STATUS "TCL readline library: ${TCL_READLINE_LIBRARY}")
   else()
-    message(STATUS "TCL readline: not found")
+    message(STATUS "TCL readline library: NOT FOUND")
+  endif()
+
+  find_path(TCL_READLINE_INCLUDE tclreadline.h)
+  if (TCL_READLINE_INCLUDE)
+    message(STATUS "TCL readline header: ${TCL_READLINE_INCLUDE}/tclreadline.h")
+  else()
+    message(STATUS "TCL readline header: NOT FOUND")
+  endif()
+
+  if (TCL_READLINE_LIBRARY AND TCL_READLINE_INCLUDE)
+    set(TCL_READLINE 1)
   endif()
 endif()
 
@@ -367,35 +380,7 @@ find_package(Threads)
 
 find_package(Eigen3 REQUIRED)
 
-################################################################
-#
-# Locate CUDD bdd package.
-#
-set(CUDD 0)
-if (USE_CUDD)
-  find_library(CUDD_LIB
-    NAME cudd
-    PATHS ${CUDD_DIR}
-    PATH_SUFFIXES lib lib/cudd cudd/.libs
-    )
-  if (CUDD_LIB)
-    message(STATUS "CUDD library: ${CUDD_LIB}")
-    get_filename_component(CUDD_LIB_DIR "${CUDD_LIB}" PATH)
-    get_filename_component(CUDD_LIB_PARENT1 "${CUDD_LIB_DIR}" PATH)
-    find_file(CUDD_HEADER cudd.h
-      PATHS ${CUDD_LIB_PARENT1} ${CUDD_LIB_PARENT1}/include ${CUDD_LIB_PARENT1}/include/cudd)
-    if (CUDD_HEADER)
-      get_filename_component(CUDD_INCLUDE "${CUDD_HEADER}" PATH)
-      message(STATUS "CUDD header: ${CUDD_HEADER}")
-      # Referenced by StaConfig.hh.cmake
-      set(CUDD 1)
-    else()
-      message(STATUS "CUDD header: not found")
-    endif()
-  else()
-    message(STATUS "CUDD library: not found")
-  endif()
-endif()
+include(cmake/FindCUDD.cmake)
 
 if("${SSTA}" STREQUAL "")
   set(SSTA 0)
@@ -404,7 +389,7 @@ message(STATUS "SSTA: ${SSTA}")
 
 # configure a header file to pass some of the CMake settings
 configure_file(${STA_HOME}/util/StaConfig.hh.cmake
-  ${STA_HOME}/include/sta/StaConfig.hh
+  ${CMAKE_CURRENT_BINARY_DIR}/include/sta/StaConfig.hh
   )
 
 ###########################################################
@@ -426,23 +411,24 @@ set_property(SOURCE ${STA_SWIG_FILE}
   PROPERTY SWIG_FLAGS
   -module sta
   -namespace -prefix sta
-  -I${STA_HOME}/tcl
-  -I${STA_HOME}/sdf
-  -I${STA_HOME}/dcalc
-  -I${STA_HOME}/parasitics
-  -I${STA_HOME}/power
-  -I${STA_HOME}/verilog
+  -I${STA_HOME}
 )
 
 set(SWIG_FILES
   ${STA_HOME}/dcalc/DelayCalc.i
+  ${STA_HOME}/graph/Graph.i
+  ${STA_HOME}/liberty/Liberty.i
+  ${STA_HOME}/network/Network.i
+  ${STA_HOME}/network/NetworkEdit.i
   ${STA_HOME}/parasitics/Parasitics.i
   ${STA_HOME}/power/Power.i
+  ${STA_HOME}/sdc/Sdc.i
   ${STA_HOME}/sdf/Sdf.i
+  ${STA_HOME}/search/Search.i
+  ${STA_HOME}/spice/WriteSpice.i
   ${STA_HOME}/tcl/Exception.i
-  ${STA_HOME}/tcl/StaTcl.i
   ${STA_HOME}/tcl/StaTclTypes.i
-  ${STA_HOME}/tcl/NetworkEdit.i
+  ${STA_HOME}/util/Util.i
   ${STA_HOME}/verilog/Verilog.i
   )
 
@@ -462,8 +448,7 @@ set_source_files_properties(${STA_SWIG_CXX_FILE}
   PROPERTIES
   # No simple way to modify the swig template that emits code full of warnings
   # so suppress them.
-  COMPILE_OPTIONS "-Wno-cast-qual;-Wno-missing-braces;-Wno-deprecated-declarations"
-  INCLUDE_DIRECTORIES "${CUDD_INCLUDE}"
+  COMPILE_OPTIONS "-Wunused-variable;-Wno-cast-qual;-Wno-missing-braces;-Wno-deprecated-declarations"
   )
 
 target_link_libraries(sta_swig
@@ -479,14 +464,12 @@ target_include_directories(sta_swig
   PRIVATE
   ${STA_HOME}
   ${TCL_INCLUDE_PATH}
+  ${CMAKE_CURRENT_BINARY_DIR}/include/sta
 )
 
 ###########################################################
 # Library
 ###########################################################
-
-# compatibility with configure
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${STA_HOME}/app)
 
 add_library(OpenSTA)
 
@@ -496,58 +479,64 @@ target_sources(OpenSTA
 
   ${STA_TCL_INIT}
 
-  ${FLEX_LibertyExprLex_OUTPUTS}
-  ${BISON_LibertyExprParser_OUTPUTS}
+  ${FLEX_LibExprLex_OUTPUTS}
+  ${BISON_LibExprParse_OUTPUTS}
   ${FLEX_LibertyLex_OUTPUTS}
-  ${BISON_LibertyParser_OUTPUTS}
+  ${BISON_LibertyParse_OUTPUTS}
 
   ${FLEX_SpefLex_OUTPUTS}
-  ${BISON_SpefParser_OUTPUTS}
+  ${BISON_SpefParse_OUTPUTS}
 
   ${FLEX_SdfLex_OUTPUTS}
-  ${BISON_SdfParser_OUTPUTS}
+  ${BISON_SdfParse_OUTPUTS}
 
   ${FLEX_VerilogLex_OUTPUTS}
-  ${BISON_VerilogParser_OUTPUTS}
+  ${BISON_VerilogParse_OUTPUTS}
+
+  ${FLEX_SaifLex_OUTPUTS}
+  ${BISON_SaifParse_OUTPUTS}
 )
 
 target_link_libraries(OpenSTA
   Eigen3::Eigen
   ${TCL_LIBRARY}
   ${CMAKE_THREAD_LIBS_INIT}
+  ${CUDD_LIB}
   )
-
-if (TCL_READLINE_LIBRARY)
-  target_link_libraries(OpenSTA ${TCL_READLINE_LIBRARY})
-endif()
 
 if (ZLIB_LIBRARIES)
   target_link_libraries(OpenSTA ${ZLIB_LIBRARIES})
-endif()
-
-if (CUDD_LIB)
-  target_link_libraries(OpenSTA ${CUDD_LIB})
 endif()
 
 target_include_directories(OpenSTA
   PUBLIC
   include
   ${TCL_INCLUDE_PATH}
-  ${TCL_READLINE_INCLUDE}
+  ${FLEX_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_BINARY_DIR}/include/sta
 
   PRIVATE
   include/sta
   ${STA_HOME}
   ${CUDD_INCLUDE}
+  # For flex to find location.hh
+  ${CMAKE_CURRENT_BINARY_DIR}
   )
+
+if (TCL_READLINE)
+  target_link_libraries(OpenSTA ${TCL_READLINE_LIBRARY})
+  target_include_directories(OpenSTA
+    PUBLIC
+    ${TCL_READLINE_INCLUDE})
+endif()
 
 # common to gcc/clang
 set(CXX_FLAGS -Wall -Wextra -pedantic -Wcast-qual -Wredundant-decls -Wformat-security)
 
-if(USE_SANITIZE)
-  message(STATUS "Sanitize: ${USE_SANITIZE}")
-  set(CXX_FLAGS "${CXX_FLAGS};-fsanitize=address;-fno-omit-frame-pointer;-fno-common")
-  set(CMAKE_EXE_LINKER_FLAGS "-fsanitize=address")
+if(ENABLE_TSAN)
+  message(STATUS "Thread sanitizer: ${ENABLE_TSAN}")
+  set(CXX_FLAGS "${CXX_FLAGS};-fsanitize=thread")
+  set(CMAKE_EXE_LINKER_FLAGS "-fsanitize=thread")
 endif()
 
 target_compile_options(OpenSTA
@@ -559,14 +548,13 @@ target_compile_options(OpenSTA
 
 # Disable compiler specific extensions like gnu++11.
 set_target_properties(OpenSTA PROPERTIES CXX_EXTENSIONS OFF)
-target_compile_features(OpenSTA PUBLIC cxx_std_11)
+target_compile_features(OpenSTA PUBLIC cxx_std_17)
+
+message(STATUS "STA library: ${CMAKE_BINARY_DIR}/libOpenSTA.a")
 
 ###########################################################
 # Executable
 ###########################################################
-
-# compatibility with configure
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${STA_HOME}/app)
 
 # Note executable and lib name cannot be the same because
 # on osx something is case insensitive. Using STA for the
@@ -578,7 +566,7 @@ target_link_libraries(sta
   OpenSTA
   )
 
-message(STATUS "STA executable: ${STA_HOME}/app/sta")
+message(STATUS "STA executable: ${CMAKE_BINARY_DIR}/sta")
 
 ################################################################
 # Install
@@ -592,6 +580,7 @@ install(TARGETS OpenSTA DESTINATION lib)
 
 # include
 install(DIRECTORY include/sta  DESTINATION include)
+install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include/sta  DESTINATION include)
 
 ################################################################
 
@@ -599,8 +588,16 @@ add_custom_target(sta_tags etags -o TAGS
   ${STA_SOURCE}
   */*.hh
   include/sta/*.hh
+  ${CMAKE_CURRENT_BINARY_DIR}/include/sta/*.hh
   ${SWIG_FILES}
   ${STA_TCL_FILES}
   ${SWIG_TCL_FILES}
   WORKING_DIRECTORY ${STA_HOME}
   )
+
+add_custom_command(
+  TARGET OpenSTA
+  POST_BUILD
+  COMMAND ${CMAKE_SOURCE_DIR}/etc/FindMessages.tcl > ${CMAKE_SOURCE_DIR}/doc/messages.txt || true
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)

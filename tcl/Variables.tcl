@@ -1,5 +1,5 @@
 # OpenSTA, Static Timing Analyzer
-# Copyright (c) 2024, Parallax Software, Inc.
+# Copyright (c) 2025, Parallax Software, Inc.
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
+# 
+# The origin of this software must not be misrepresented; you must not
+# claim that you wrote the original software.
+# 
+# Altered source versions must be plainly marked as such, and must not be
+# misrepresented as being the original software.
+# 
+# This notice may not be removed or altered from any source distribution.
 
 namespace eval sta {
 
@@ -21,14 +29,6 @@ namespace eval sta {
 # Variables
 #
 ################################################################
-
-trace variable ::link_make_black_boxes "rw" \
-  sta::trace_link_make_black_boxes
-
-proc trace_link_make_black_boxes { name1 name2 op } {
-  trace_boolean_var $op ::link_make_black_boxes \
-    link_make_black_boxes set_link_make_black_boxes
-}
 
 # Default digits to print after decimal point for reporting commands.
 set ::sta_report_default_digits 2

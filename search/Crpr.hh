@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -34,9 +42,9 @@ public:
   Arrival maxCrpr(ClkInfo *clk_info);
   // Timing check CRPR.
   Crpr checkCrpr(const Path *src_clk_path,
-		 const PathVertex *tgt_clk_path);
+		 const Path *tgt_clk_path);
   void checkCrpr(const Path *src_path,
-		 const PathVertex *tgt_clk_path,
+		 const Path *tgt_clk_path,
 		 // Return values.
 		 Crpr &crpr,
 		 Pin *&crpr_pin);
@@ -49,18 +57,12 @@ public:
 		       Crpr &crpr,
 		       Pin *&crpr_pin);
 
-  // Previous clk path when crpr is enabled.
-  PathVertex clkPathPrev(const PathVertex *path);
-  // For Search::reportArrivals.
-  PathVertex clkPathPrev(Vertex *vertex,
-			 int arrival_index);
-
 private:
-  PathVertex *clkPathPrev(const PathVertex *path,
-			  PathVertex &tmp);
-  Arrival otherMinMaxArrival(const PathVertex *path);
+  void clkPathPrev(const Path *path,
+                   Path &prev);
+  Arrival otherMinMaxArrival(const Path *path);
   void checkCrpr1(const Path *src_path,
-		  const PathVertex *tgt_clk_path,
+		  const Path *tgt_clk_path,
 		  bool same_pin,
 		  // Return values.
 		  Crpr &crpr,
@@ -74,22 +76,19 @@ private:
 			Pin *&crpr_pin);
   bool crprPossible(const Clock *clk1,
 		    const Clock *clk2);
-  void genClkSrcPaths(const PathVertex *path,
-		      PathVertexSeq &gclk_paths);
-  void findCrpr(const PathVertex *src_clk_path,
-		const PathVertex *tgt_clk_path,
+  ConstPathSeq genClkSrcPaths(const Path *path);
+  void findCrpr(const Path *src_clk_path,
+		const Path *tgt_clk_path,
 		bool same_pin,
 		// Return values.
 		Crpr &crpr,
 		Pin *&common_pin);
-  void portClkPath(const ClockEdge *clk_edge,
-		   const Pin *clk_src_pin,
-		   const PathAnalysisPt *path_ap,
-		   // Return value.
-		   PathVertex &port_clk_path);
-  Crpr findCrpr1(const PathVertex *src_clk_path,
-		 const PathVertex *tgt_clk_path);
-  float crprArrivalDiff(const PathVertex *path);
+  Path *portClkPath(const ClockEdge *clk_edge,
+                    const Pin *clk_src_pin,
+                    const PathAnalysisPt *path_ap);
+  Crpr findCrpr1(const Path *src_clk_path,
+		 const Path *tgt_clk_path);
+  float crprArrivalDiff(const Path *path);
 };
 
 } // namespace

@@ -1,5 +1,5 @@
 # OpenSTA, Static Timing Analyzer
-# Copyright (c) 2024, Parallax Software, Inc.
+# Copyright (c) 2025, Parallax Software, Inc.
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
+# 
+# The origin of this software must not be misrepresented; you must not
+# claim that you wrote the original software.
+# 
+# Altered source versions must be plainly marked as such, and must not be
+# misrepresented as being the original software.
+# 
+# This notice may not be removed or altered from any source distribution.
 
 namespace eval sta {
 
@@ -37,16 +45,20 @@ proc_redirect read_spef {
 
   set reduce [info exists flags(-reduce)]
   if { [info exists flags(-quiet)] } {
+    # deprecated 2024-02-08
     sta_warn 272 "read_spef -quiet is deprecated."
   }
   if { [info exists keys(-reduce_to)] } {
+    # deprecated 2024-02-08
     sta_warn 273 "read_spef -reduce_to is deprecated. Use -reduce instead."
     set reduce 1
   }
   if { [info exists flags(-delete_after_reduce)] } {
+    # deprecated 2024-02-08
     sta_warn 274 "read_spef -delete_after_reduce is deprecated."
   }
   if { [info exists flags(-save)] } {
+    # deprecated 2024-02-08
     sta_warn 275 "read_spef -save is deprecated."
   }
 
@@ -74,7 +86,7 @@ proc_redirect read_spef {
             $coupling_reduction_factor $reduce]
 }
 
-define_cmd_args "report_parasitic_annotation" {-report_unannotated}
+define_cmd_args "report_parasitic_annotation" {[-report_unannotated]}
 
 proc_redirect report_parasitic_annotation {
   parse_key_args "report_parasitic_annotation" args \

@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -37,10 +45,9 @@ class PatternMatch;
 class LibertyCell;
 class LibertyPort;
 
-typedef Map<const char*, ConcreteCell*, CharPtrLess> ConcreteCellMap;
-typedef Map<string, string> AttributeMap;
+typedef Map<std::string, ConcreteCell*> ConcreteCellMap;
 typedef Vector<ConcretePort*> ConcretePortSeq;
-typedef Map<const char*, ConcretePort*, CharPtrLess> ConcretePortMap;
+typedef Map<std::string, ConcretePort*> ConcretePortMap;
 typedef ConcreteCellMap::ConstIterator ConcreteLibraryCellIterator;
 typedef ConcretePortSeq::ConstIterator ConcreteCellPortIterator;
 typedef ConcretePortSeq::ConstIterator ConcretePortMemberIterator;
@@ -52,11 +59,11 @@ public:
 			   const char *filename,
 			   bool is_liberty);
   virtual ~ConcreteLibrary();
-  const char *name() const { return name_; }
+  const char *name() const { return name_.c_str(); }
   void setName(const char *name);
   ObjectId id() const { return id_; }
   bool isLiberty() const { return is_liberty_; }
-  const char *filename() const { return filename_; }
+  const char *filename() const { return filename_.c_str(); }
   void addCell(ConcreteCell *cell);
   ConcreteCell *makeCell(const char *name,
 			 bool is_leaf,
@@ -74,9 +81,9 @@ protected:
   void renameCell(ConcreteCell *cell,
 		  const char *cell_name);
 
-  const char *name_;
+  std::string name_;
   ObjectId id_;
-  const char *filename_;
+  std::string filename_;
   bool is_liberty_;
   char bus_brkt_left_;
   char bus_brkt_right_;
@@ -91,9 +98,9 @@ class ConcreteCell
 public:
   // Use ConcreteLibrary::deleteCell.
   virtual ~ConcreteCell();
-  const char *name() const { return name_; }
+  const char *name() const { return name_.c_str(); }
   ObjectId id() const { return id_; }
-  const char *filename() const { return filename_; }
+  const char *filename() const { return filename_.c_str(); }
   ConcreteLibrary *library() const { return library_; }
   LibertyCell *libertyCell() const { return liberty_cell_; }
   void setLibertyCell(LibertyCell *cell);
@@ -106,9 +113,10 @@ public:
   ConcreteCellPortBitIterator *portBitIterator() const;
   bool isLeaf() const { return is_leaf_; }
   void setIsLeaf(bool is_leaf);
-  void setAttribute(const string &key,
-                    const string &value);
-  string getAttribute(const string &key) const;
+  void setAttribute(const std::string &key,
+                    const std::string &value);
+  std::string getAttribute(const std::string &key) const;
+  const AttributeMap &attributeMap() const { return attribute_map_; }
 
   // Cell acts as port factory.
   ConcretePort *makePort(const char *name);
@@ -148,10 +156,10 @@ protected:
 		      const char *name,
 		      int index);
 
-  const char *name_;
+  std::string name_;
   ObjectId id_;
   // Filename is optional.
-  const char *filename_;
+  std::string filename_;
   ConcreteLibrary *library_;
   LibertyCell *liberty_cell_;
   // External application cell.
@@ -173,7 +181,7 @@ class ConcretePort
 {
 public:
   virtual ~ConcretePort();
-  const char *name() const { return name_; }
+  const char *name() const { return name_.c_str(); }
   ObjectId id() const { return id_; }
   const char *busName() const;
   Cell *cell() const;
@@ -228,7 +236,7 @@ protected:
 	       ConcretePortSeq *member_ports,
                ConcreteCell *cell);
 
-  const char *name_;
+  std::string name_;
   ObjectId id_;
   ConcreteCell *cell_;
   PortDirection *direction_;

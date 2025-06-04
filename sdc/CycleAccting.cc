@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "CycleAccting.hh"
 
@@ -71,10 +79,10 @@ CycleAcctings::reportClkToClkMaxCycleWarnings(Report *report)
   // duplicate warnings between different src/tgt clk edges.
   ClockPairSet clk_warnings;
   for (Clock *src_clk : *sdc_->clocks()) {
-    for (RiseFall *src_rf : RiseFall::range()) {
+    for (const RiseFall *src_rf : RiseFall::range()) {
       ClockEdge *src = src_clk->edge(src_rf);
       for (Clock *tgt_clk : *sdc_->clocks()) {
-        for (RiseFall *tgt_rf : RiseFall::range()) {
+        for (const RiseFall *tgt_rf : RiseFall::range()) {
           ClockEdge *tgt = tgt_clk->edge(tgt_rf);
           CycleAccting probe(src, tgt);
           CycleAccting *acct = cycle_acctings_.findKey(&probe);
@@ -312,7 +320,7 @@ CycleAccting::setHoldAccting(int src_cycle,
 }
 
 void
-CycleAccting::setAccting(TimingRole *role,
+CycleAccting::setAccting(const TimingRole *role,
 			 int src_cycle,
 			 int tgt_cycle,
 			 float delay,

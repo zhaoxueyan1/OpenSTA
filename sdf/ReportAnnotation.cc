@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "sdf/ReportAnnotation.hh"
 
@@ -85,7 +93,7 @@ protected:
 		   int index,
 		   int &total,
 		   int &annotated_total);
-  void reportCheckCount(TimingRole *role,
+  void reportCheckCount(const TimingRole *role,
 			int &total,
 			int &annotated_total);
   int roleIndex(const TimingRole *role,
@@ -276,14 +284,14 @@ ReportAnnotated::reportCheckCounts()
 }
 
 void
-ReportAnnotated::reportCheckCount(TimingRole *role,
+ReportAnnotated::reportCheckCount(const TimingRole *role,
 				  int &total,
 				  int &annotated_total)
 {
   int index = role->index();
   if (edge_count_[index] > 0) {
-    string title;
-    stringPrint(title, "cell %s arcs", role->asString());
+    std::string title;
+    stringPrint(title, "cell %s arcs", role->to_string().c_str());
     reportCount(title.c_str(), index, total, annotated_total);
   }
 }
@@ -470,13 +478,13 @@ ReportAnnotated::reportArcs(Vertex *vertex,
   while (edge_iter.hasNext()
 	 && (max_lines_ == 0 || i < max_lines_)) {
     Edge *edge = edge_iter.next();
-    TimingRole *role = edge->role();
+    const TimingRole *role = edge->role();
     const Pin *to_pin = edge->to(graph_)->pin();
     if (graph_->delayAnnotated(edge) == report_annotated
 	&& report_role_[roleIndex(role, from_pin, to_pin)]) {
       const char *role_name;
       if (role->isTimingCheck())
-	role_name = role->asString();
+	role_name = role->to_string().c_str();
       else if (role->isWire()) {
 	if (network_->isTopLevelPort(from_pin))
 	  role_name = "primary input net";

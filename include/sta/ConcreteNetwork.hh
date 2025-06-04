@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -38,7 +46,6 @@ class ConcreteBindingTbl;
 class ConcreteLibertyLibraryIterator;
 
 typedef Vector<ConcreteLibrary*> ConcreteLibrarySeq;
-typedef Map<string, string> AttributeMap;
 typedef Map<const char*, ConcreteLibrary*, CharPtrLess> ConcreteLibraryMap;
 typedef ConcreteLibrarySeq::ConstIterator ConcreteLibraryIterator;
 typedef Map<const char *, ConcreteInstance*,
@@ -75,8 +82,9 @@ public:
                             const PatternMatch *pattern) const override;
 
   const char *name(const Cell *cell) const override;
-  string getAttribute(const Cell *cell,
-                      const string &key) const override;
+  std::string getAttribute(const Cell *cell,
+                           const std::string &key) const override;
+  const AttributeMap &attributeMap(const Cell *cell) const override;
   ObjectId id(const Cell *cell) const override;
   Library *library(const Cell *cell) const override;
   LibertyCell *libertyCell(Cell *cell) const override;
@@ -111,8 +119,9 @@ public:
   PortMemberIterator *memberIterator(const Port *port) const override;
 
   const char *name(const Instance *instance) const override;
-  string getAttribute(const Instance *inst,
-                      const string &key) const override;
+  std::string getAttribute(const Instance *inst,
+                           const std::string &key) const override;
+  const AttributeMap &attributeMap(const Instance *inst) const override;
   ObjectId id(const Instance *instance) const override;
   Cell *cell(const Instance *instance) const override;
   Instance *parent(const Instance *instance) const override;
@@ -181,8 +190,8 @@ public:
   void setIsLeaf(Cell *cell,
                  bool is_leaf) override;
   void setAttribute(Cell *cell,
-                    const string &key,
-                    const string &value) override;
+                    const std::string &key,
+                    const std::string &value) override;
   Port *makePort(Cell *cell,
                  const char *name) override;
   Port *makeBusPort(Cell *cell,
@@ -215,8 +224,8 @@ public:
                LibertyPort *port,
                Net *net) override;
   void setAttribute(Instance *inst,
-                    const string &key,
-                    const string &value) override;
+                    const std::string &key,
+                    const std::string &value) override;
   void disconnectPin(Pin *pin) override;
   void deletePin(Pin *pin) override;
   Net *makeNet(const char *name,
@@ -237,7 +246,7 @@ public:
   void deleteCellNetworkViews() override;
 
   void readNetlistBefore() override;
-  void setLinkFunc(LinkNetworkFunc *link) override;
+  void setLinkFunc(LinkNetworkFunc link) override;
   static ObjectId nextObjectId();
 
   // Used by external tools.
@@ -273,7 +282,7 @@ protected:
   ConcreteLibraryMap library_map_;
   Instance *top_instance_;
   NetSet constant_nets_[2];  // LogicValue::zero/one
-  LinkNetworkFunc *link_func_;
+  LinkNetworkFunc link_func_;
   CellNetworkViewMap cell_network_view_map_;
   static ObjectId object_id_;
 
@@ -296,9 +305,10 @@ public:
   InstanceNetIterator *netIterator() const;
   Instance *findChild(const char *name) const;
   InstanceChildIterator *childIterator() const;
-  void setAttribute(const string &key,
-                    const string &value);
-  string getAttribute(const string &key) const;
+  void setAttribute(const std::string &key,
+                    const std::string &value);
+  std::string getAttribute(const std::string &key) const;
+  const AttributeMap &attributeMap() const { return attribute_map_; }
   void addChild(ConcreteInstance *child);
   void deleteChild(ConcreteInstance *child);
   void addPin(ConcretePin *pin);

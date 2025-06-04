@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -70,8 +78,8 @@ public:
 				       LibertyPort *from_port,
 				       LibertyPort *to_port,
 				       LibertyPort *related_out,
-				       RiseFall *from_rf,
-				       TimingRole *role,
+				       const RiseFall *from_rf,
+				       const TimingRole *role,
 				       TimingArcAttrsPtr attrs);
   TimingArcSet *makeCombinationalArcs(LibertyCell *cell,
 				      LibertyPort *from_port,
@@ -81,14 +89,14 @@ public:
 				      TimingArcAttrsPtr attrs);
   TimingArcSet *makeClockTreePathArcs(LibertyCell *cell,
                                       LibertyPort *to_port,
-                                      TimingRole *role,
+                                      const TimingRole *role,
                                       const MinMax *min_max,
                                       TimingArcAttrsPtr attrs);
   TimingArcSet *makeMinPulseWidthArcs(LibertyCell *cell,
                                       LibertyPort *from_port,
                                       LibertyPort *to_port,
                                       LibertyPort *related_out,
-                                      TimingRole *role,
+                                      const TimingRole *role,
                                       TimingArcAttrsPtr attrs);
 
 protected:
@@ -114,21 +122,21 @@ protected:
   virtual TimingArcSet *makeTimingArcSet(LibertyCell *cell,
 					 LibertyPort *from,
 					 LibertyPort *to,
-					 TimingRole *role,
+					 const TimingRole *role,
 					 TimingArcAttrsPtr attrs);
   virtual TimingArcSet *makeTimingArcSet(LibertyCell *cell,
 					 LibertyPort *from,
 					 LibertyPort *to,
 					 LibertyPort *related_out,
-					 TimingRole *role,
+					 const TimingRole *role,
 					 TimingArcAttrsPtr attrs);
   virtual TimingArc *makeTimingArc(TimingArcSet *set,
-				   Transition *from_rf,
-				   Transition *to_rf,
+				   const Transition *from_rf,
+				   const Transition *to_rf,
 				   TimingModel *model);
   TimingArc *makeTimingArc(TimingArcSet *set,
-			   RiseFall *from_rf,
-			   RiseFall *to_rf,
+			   const RiseFall *from_rf,
+			   const RiseFall *to_rf,
 			   TimingModel *model);
   TimingArcSet *makeLatchDtoQArcs(LibertyCell *cell,
 				  LibertyPort *from_port,
@@ -138,12 +146,12 @@ protected:
   TimingArcSet *makeRegLatchArcs(LibertyCell *cell,
 				 LibertyPort *from_port,
 				 LibertyPort *to_port,
-				 RiseFall *from_rf,
+				 const RiseFall *from_rf,
 				 TimingArcAttrsPtr attrs);
   TimingArcSet *makePresetClrArcs(LibertyCell *cell,
 				  LibertyPort *from_port,
 				  LibertyPort *to_port,
-				  RiseFall *to_rf,
+				  const RiseFall *to_rf,
 				  TimingArcAttrsPtr attrs);
   TimingArcSet *makeTristateEnableArcs(LibertyCell *cell,
 				       LibertyPort *from_port,

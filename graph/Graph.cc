@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "Graph.hh"
 
@@ -30,6 +38,8 @@
 
 namespace sta {
 
+using std::string;
+
 ////////////////////////////////////////////////////////////////
 //
 // Graph
@@ -38,14 +48,11 @@ namespace sta {
 
 Graph::Graph(StaState *sta,
 	     int slew_rf_count,
-	     bool have_arc_delays,
 	     DcalcAPIndex ap_count) :
   StaState(sta),
   vertices_(nullptr),
   edges_(nullptr),
-  arc_count_(0),
   slew_rf_count_(slew_rf_count),
-  have_arc_delays_(have_arc_delays),
   ap_count_(ap_count),
   period_check_annotations_(nullptr),
   reg_clk_vertices_(new VertexSet(graph_))
@@ -56,11 +63,11 @@ Graph::Graph(StaState *sta,
 
 Graph::~Graph()
 {
-  delete vertices_;
+  edges_->clear();
   delete edges_;
+  vertices_->clear();
+  delete vertices_;
   delete reg_clk_vertices_;
-  deleteSlewTables();
-  deleteArcDelayTables();
   removePeriodCheckAnnotations();
 }
 
@@ -82,8 +89,6 @@ Graph::makeVerticesAndEdges()
 {
   vertices_ = new VertexTable;
   edges_ = new EdgeTable;
-  makeSlewTables(ap_count_);
-  makeArcDelayTables(ap_count_);
 
   LeafInstanceIterator *leaf_iter = network_->leafInstanceIterator();
   while (leaf_iter->hasNext()) {
@@ -203,7 +208,7 @@ Graph::makePortInstanceEdges(const Instance *inst,
 	// Vertices can be missing from the graph if the pins
 	// are power or ground.
 	if (from_vertex) {
-          TimingRole *role = arc_set->role();
+          const TimingRole *role = arc_set->role();
   	  bool is_check = role->isTimingCheckBetween();
 	  if (to_bidirect_drvr_vertex && !is_check)
 	    makeEdge(from_vertex, to_bidirect_drvr_vertex, arc_set);
@@ -432,7 +437,7 @@ Graph::makeVertex(Pin *pin,
 {
   Vertex *vertex = vertices_->make();
   vertex->init(pin, is_bidirect_drvr, is_reg_clk);
-  makeVertexSlews(vertex);
+  initSlews(vertex);
   if (is_reg_clk)
     reg_clk_vertices_->insert(vertex);
   return vertex;
@@ -483,7 +488,7 @@ Graph::deleteVertex(Vertex *vertex)
     Edge *edge = Graph::edge(edge_id);
     next_id = edge->vertex_in_link_;
     deleteOutEdge(edge->from(this), edge);
-    arc_count_ -= edge->timingArcSet()->arcCount();
+    edge->clear();
     edges_->destroy(edge);
   }
   // Delete edges from vertex.
@@ -491,9 +496,10 @@ Graph::deleteVertex(Vertex *vertex)
     Edge *edge = Graph::edge(edge_id);
     next_id = edge->vertex_out_next_;
     deleteInEdge(edge->to(this), edge);
-    arc_count_ -= edge->timingArcSet()->arcCount();
+    edge->clear();
     edges_->destroy(edge);
   }
+  vertex->clear();
   vertices_->destroy(vertex);
 }
 
@@ -567,118 +573,42 @@ Graph::gateEdgeArc(const Pin *in_pin,
 
 ////////////////////////////////////////////////////////////////
 
-Arrival *
-Graph::makeArrivals(Vertex *vertex,
-		    uint32_t count)
+Path *
+Graph::makePaths(Vertex *vertex,
+                 uint32_t count)
 {
-  if (vertex->arrivals() != arrival_null)
-    debugPrint(debug_, "graph", 1, "arrival leak");
-  Arrival *arrivals;
-  ArrivalId id;
-  {
-    LockGuard lock(arrivals_lock_);
-    arrivals_.make(count, arrivals, id);
-  }
-  vertex->setArrivals(id);
-  return arrivals;
+  Path *paths = new Path[count];
+  vertex->setPaths(paths);
+  return paths;
 }
 
-Arrival *
-Graph::arrivals(Vertex *vertex)
+Path *
+Graph::paths(const Vertex *vertex) const
 {
-  return arrivals_.pointer(vertex->arrivals());
+  return vertex->paths();
 }
 
 void
-Graph::deleteArrivals(Vertex *vertex,
-                      uint32_t count)
+Graph::deletePaths(Vertex *vertex)
 {
-  {
-    LockGuard lock(arrivals_lock_);
-    arrivals_.destroy(vertex->arrivals(), count);
-  }
-  vertex->setArrivals(arrival_null);
-}
-
-Required *
-Graph::makeRequireds(Vertex *vertex,
-                     uint32_t count)
-{
-  if (vertex->requireds() != arrival_null)
-    debugPrint(debug_, "graph", 1, "required leak");
-  Required *requireds;
-  ArrivalId id;
-  {
-    LockGuard lock(requireds_lock_);
-    requireds_.make(count, requireds, id);
-  }
-  vertex->setRequireds(id);
-  return requireds;
-}
-
-Required *
-Graph::requireds(Vertex *vertex)
-{
-  return requireds_.pointer(vertex->requireds());
-}
-
-void
-Graph::deleteRequireds(Vertex *vertex,
-                       uint32_t count)
-{
-  {
-    LockGuard lock(requireds_lock_);
-    requireds_.destroy(vertex->requireds(), count);
-  }
-  vertex->setRequireds(arrival_null);
-}
-
-void
-Graph::clearArrivals()
-{
-  arrivals_.clear();
-  requireds_.clear();
-}
-
-PathVertexRep *
-Graph::makePrevPaths(Vertex *vertex,
-		     uint32_t count)
-{
-  PathVertexRep *prev_paths;
-  PrevPathId id;
-  {
-    LockGuard lock(prev_paths_lock_);
-    prev_paths_.make(count, prev_paths, id);
-  }
-  vertex->setPrevPaths(id);
-  return prev_paths;
-}
-
-PathVertexRep *
-Graph::prevPaths(Vertex *vertex) const
-{
-  return prev_paths_.pointer(vertex->prevPaths());
-}
-
-void
-Graph::clearPrevPaths()
-{
-  prev_paths_.clear();
+  vertex->setPaths(nullptr);
+  vertex->tag_group_index_ = tag_group_index_max;
+  vertex->crpr_path_pruning_disabled_ = false;
 }
 
 ////////////////////////////////////////////////////////////////
 
 const Slew &
 Graph::slew(const Vertex *vertex,
-	    const RiseFall *rf,
-	    DcalcAPIndex ap_index)
+            const RiseFall *rf,
+            DcalcAPIndex ap_index)
 {
   if (slew_rf_count_) {
-    int table_index =
-      (slew_rf_count_ == 1) ? ap_index : ap_index*slew_rf_count_+rf->index();
-    DelayTable *table = slew_tables_[table_index];
-    VertexId vertex_id = id(vertex);
-    return table->ref(vertex_id);
+    const Slew *slews = vertex->slews();
+    size_t slew_index = (slew_rf_count_ == 1)
+      ? ap_index
+      : ap_index*slew_rf_count_+rf->index();
+    return slews[slew_index];
   }
   else {
     static Slew slew(0.0);
@@ -688,17 +618,21 @@ Graph::slew(const Vertex *vertex,
 
 void
 Graph::setSlew(Vertex *vertex,
-	       const RiseFall *rf,
-	       DcalcAPIndex ap_index,
-	       const Slew &slew)
+               const RiseFall *rf,
+               DcalcAPIndex ap_index,
+               const Slew &slew)
 {
   if (slew_rf_count_) {
-    int table_index =
-      (slew_rf_count_ == 1) ? ap_index : ap_index*slew_rf_count_+rf->index();
-    DelayTable *table = slew_tables_[table_index];
-    VertexId vertex_id = id(vertex);
-    Slew &vertex_slew = table->ref(vertex_id);
-    vertex_slew = slew;
+    Slew *slews = vertex->slews();
+    if (slews == nullptr) {
+      int slew_count = slew_rf_count_ * ap_count_;
+      slews = new Slew[slew_count];
+      vertex->setSlews(slews);
+    }
+    size_t slew_index = (slew_rf_count_ == 1)
+      ? ap_index
+      : ap_index*slew_rf_count_+rf->index();
+    slews[slew_index] = slew;
   }
 }
 
@@ -723,8 +657,6 @@ Graph::makeEdge(Vertex *from,
 {
   Edge *edge = edges_->make();
   edge->init(id(from), id(to), arc_set);
-  makeEdgeArcDelays(edge);
-  arc_count_ += arc_set->arcCount();
   // Add out edge to from vertex.
   EdgeId next = from->out_edges_;
   edge->vertex_out_next_ = next;
@@ -738,6 +670,7 @@ Graph::makeEdge(Vertex *from,
   edge->vertex_in_link_ = to->in_edges_;
   to->in_edges_ = edge_id;
 
+  initArcDelays(edge);
   return edge;
 }
 
@@ -748,50 +681,8 @@ Graph::deleteEdge(Edge *edge)
   Vertex *to = edge->to(this);
   deleteOutEdge(from, edge);
   deleteInEdge(to, edge);
-  arc_count_ -= edge->timingArcSet()->arcCount();
+  edge->clear();
   edges_->destroy(edge);
-}
-
-void
-Graph::makeArcDelayTables(DcalcAPIndex ap_count)
-{
-  if (have_arc_delays_) {
-    arc_delays_.resize(ap_count);
-    for (DcalcAPIndex i = 0; i < ap_count; i++) {
-      DelayTable *table = new DelayTable();
-      arc_delays_[i] = table;
-    }
-  }
-}
-
-void
-Graph::deleteArcDelayTables()
-{
-  arc_delays_.deleteContentsClear();
-}
-
-void
-Graph::makeEdgeArcDelays(Edge *edge)
-{
-  if (have_arc_delays_) {
-    int arc_count = edge->timingArcSet()->arcCount();
-    ArcId arc_id = 0;
-    for (DcalcAPIndex i = 0; i < ap_count_; i++) {
-      DelayTable *table = arc_delays_[i];
-      ArcDelay *arc_delays;
-      table->make(arc_count, arc_delays, arc_id);
-      for (int j = 0; j < arc_count; j++)
-	arc_delays[j] = 0.0;
-    }
-    edge->setArcDelays(arc_id);
-    // Make sure there is room for delay_annotated flags.
-    size_t max_annot_index = (arc_id + arc_count) * ap_count_;
-    if (max_annot_index >= arc_delay_annotated_.size()) {
-      size_t size = max_annot_index * 1.2;
-      arc_delay_annotated_.resize(size);
-    }
-    removeDelayAnnotated(edge);
-  }
 }
 
 ArcDelay
@@ -799,14 +690,9 @@ Graph::arcDelay(const Edge *edge,
 		const TimingArc *arc,
 		DcalcAPIndex ap_index) const
 {
-  if (have_arc_delays_) {
-    DelayTable *table = arc_delays_[ap_index];
-    ArcDelay *arc_delays = table->pointer(edge->arcDelays());
-    ArcDelay &arc_delay = arc_delays[arc->index()];
-    return arc_delay;
-  }
-  else
-    return delay_zero;
+  ArcDelay *delays = edge->arcDelays();
+  size_t index = arc->index() * ap_count_ + ap_index;
+  return delays[index];
 }
 
 void
@@ -815,11 +701,9 @@ Graph::setArcDelay(Edge *edge,
 		   DcalcAPIndex ap_index,
 		   ArcDelay delay)
 {
-  if (have_arc_delays_) {
-    DelayTable *table = arc_delays_[ap_index];
-    ArcDelay *arc_delays = table->pointer(edge->arcDelays());
-    arc_delays[arc->index()] = delay;
-  }
+  ArcDelay *arc_delays = edge->arcDelays();
+  size_t index = arc->index() * ap_count_ + ap_index;
+  arc_delays[index] = delay;
 }
 
 const ArcDelay &
@@ -827,13 +711,9 @@ Graph::wireArcDelay(const Edge *edge,
 		    const RiseFall *rf,
 		    DcalcAPIndex ap_index)
 {
-  if (have_arc_delays_) {
-    DelayTable *table = arc_delays_[ap_index];
-    ArcDelay *arc_delays = table->pointer(edge->arcDelays());
-    return arc_delays[rf->index()];
-  }
-  else
-    return delay_zero;
+  ArcDelay *delays = edge->arcDelays();
+  size_t index = rf->index() * ap_count_ + ap_index;
+  return delays[index];
 }
 
 void
@@ -842,26 +722,19 @@ Graph::setWireArcDelay(Edge *edge,
 		       DcalcAPIndex ap_index,
 		       const ArcDelay &delay)
 {
-  if (have_arc_delays_) {
-    DelayTable *table = arc_delays_[ap_index];
-    ArcDelay *arc_delays = table->pointer(edge->arcDelays());
-    arc_delays[rf->index()] = delay;
-  }
+  ArcDelay *delays = edge->arcDelays();
+  size_t index = rf->index() * ap_count_ + ap_index;
+  delays[index] = delay;
 }
+
+////////////////////////////////////////////////////////////////
 
 bool
 Graph::arcDelayAnnotated(const Edge *edge,
 			 const TimingArc *arc,
 			 DcalcAPIndex ap_index) const
 {
-  if (!arc_delay_annotated_.empty()) {
-    size_t index = (edge->arcDelays() + arc->index()) * ap_count_ + ap_index;
-    if (index >= arc_delay_annotated_.size())
-      report_->critical(1080, "arc_delay_annotated array bounds exceeded");
-    return arc_delay_annotated_[index];
-  }
-  else
-    return false;
+  return edge->arcDelayAnnotated(arc, ap_index, ap_count_);
 }
 
 void
@@ -870,22 +743,17 @@ Graph::setArcDelayAnnotated(Edge *edge,
 			    DcalcAPIndex ap_index,
 			    bool annotated)
 {
-  size_t index = (edge->arcDelays() + arc->index()) * ap_count_ + ap_index;
-  if (index >= arc_delay_annotated_.size())
-    report_->critical(1081, "arc_delay_annotated array bounds exceeded");
-  arc_delay_annotated_[index] = annotated;
+  return edge->setArcDelayAnnotated(arc, ap_index, ap_count_, annotated);
 }
 
 bool
-Graph::wireDelayAnnotated(Edge *edge,
+Graph::wireDelayAnnotated(const Edge *edge,
 			  const RiseFall *rf,
 			  DcalcAPIndex ap_index) const
 {
-  size_t index = (edge->arcDelays() + TimingArcSet::wireArcIndex(rf)) * ap_count_
-    + ap_index;
-  if (index >= arc_delay_annotated_.size())
-    report_->critical(1082, "arc_delay_annotated array bounds exceeded");
-  return arc_delay_annotated_[index];
+  int arc_index = TimingArcSet::wireArcIndex(rf);
+  TimingArc *arc = TimingArcSet::wireTimingArcSet()->findTimingArc(arc_index);
+  return edge->arcDelayAnnotated(arc, ap_index, ap_count_);
 }
 
 void
@@ -894,12 +762,18 @@ Graph::setWireDelayAnnotated(Edge *edge,
 			     DcalcAPIndex ap_index,
 			     bool annotated)
 {
-  size_t index = (edge->arcDelays() + TimingArcSet::wireArcIndex(rf)) * ap_count_
-    + ap_index;
-  if (index >= arc_delay_annotated_.size())
-    report_->critical(1083, "arc_delay_annotated array bounds exceeded");
-  arc_delay_annotated_[index] = annotated;
+  int arc_index = TimingArcSet::wireArcIndex(rf);
+  TimingArc *arc = TimingArcSet::wireTimingArcSet()->findTimingArc(arc_index);
+  return edge->setArcDelayAnnotated(arc, ap_index, ap_count_, annotated);
 }
+
+void
+Graph::removeDelayAnnotated(Edge *edge)
+{
+  edge->removeDelayAnnotated();
+}
+
+////////////////////////////////////////////////////////////////
 
 // This only gets called if the analysis type changes from single
 // to bc_wc/ocv or visa versa.
@@ -908,42 +782,53 @@ Graph::setDelayCount(DcalcAPIndex ap_count)
 {
   if (ap_count != ap_count_) {
     // Discard any existing delays.
-    deleteSlewTables();
-    deleteArcDelayTables();
     removePeriodCheckAnnotations();
-    makeSlewTables(ap_count);
-    makeArcDelayTables(ap_count);
     ap_count_ = ap_count;
-    removeDelays();
+    initSlews();
   }
 }
 
 void
-Graph::removeDelays()
+Graph::initSlews()
 {
-  VertexIterator vertex_iter(this);
+  VertexIterator vertex_iter(graph_);
   while (vertex_iter.hasNext()) {
     Vertex *vertex = vertex_iter.next();
-    makeVertexSlews(vertex);
-    VertexOutEdgeIterator edge_iter(vertex, this);
+    initSlews(vertex);
+
+    VertexOutEdgeIterator edge_iter(vertex, graph_);
     while (edge_iter.hasNext()) {
       Edge *edge = edge_iter.next();
-      makeEdgeArcDelays(edge);
-      removeDelayAnnotated(edge);
+      initArcDelays(edge);
     }
   }
 }
 
 void
-Graph::removeDelayAnnotated(Edge *edge)
+Graph::initSlews(Vertex *vertex)
 {
-  edge->setDelayAnnotationIsIncremental(false);
-  TimingArcSet *arc_set = edge->timingArcSet();
-  for (TimingArc *arc : arc_set->arcs()) {
-    for (DcalcAPIndex ap_index = 0; ap_index < ap_count_; ap_index++) {
-      setArcDelayAnnotated(edge, arc, ap_index, false);
-    }
-  }
+  size_t slew_count = slewCount();
+  Slew *slews = new Slew[slew_count];
+  vertex->setSlews(slews);
+  for (size_t i = 0; i < slew_count; i++)
+    slews[i] = 0.0;
+}
+
+size_t
+Graph::slewCount()
+{
+  return slew_rf_count_ * ap_count_;
+}
+
+void
+Graph::initArcDelays(Edge *edge)
+{
+  size_t arc_count = edge->timingArcSet()->arcCount();
+  size_t delay_count = arc_count * ap_count_;
+  ArcDelay *arc_delays = new ArcDelay[delay_count];
+  edge->setArcDelays(arc_delays);
+  for (size_t i = 0; i < delay_count; i++)
+    arc_delays[i] = 0.0;
 }
 
 bool
@@ -957,35 +842,6 @@ Graph::delayAnnotated(Edge *edge)
     }
   }
   return true;
-}
-
-void
-Graph::makeSlewTables(DcalcAPIndex ap_count)
-{
-  DcalcAPIndex tr_ap_count = slew_rf_count_ * ap_count;
-  slew_tables_.resize(tr_ap_count);
-  for (DcalcAPIndex i = 0; i < tr_ap_count; i++) {
-    DelayTable *table = new DelayTable;
-    slew_tables_[i] = table;
-  }
-}
-
-void
-Graph::deleteSlewTables()
-{
-  slew_tables_.deleteContentsClear();
-}
-
-void
-Graph::makeVertexSlews(Vertex *vertex)
-{
-  DcalcAPIndex tr_ap_count = slew_rf_count_ * ap_count_;
-  for (DcalcAPIndex i = 0; i < tr_ap_count; i++) {
-    DelayTable *table = slew_tables_[i];
-    // Slews are 1:1 with vertices and use the same object id.
-    Slew *slew = table->ensureId(vertices_->objectId(vertex));
-    *slew = 0.0;
-  }
 }
 
 ////////////////////////////////////////////////////////////////
@@ -1041,7 +897,7 @@ Graph::setPeriodCheckAnnotation(const Pin *pin,
 				float period)
 {
   if (period_check_annotations_ == nullptr)
-    period_check_annotations_ = new PeriodCheckAnnotations;
+    period_check_annotations_ = new PeriodCheckAnnotations(network_);
   float *periods = period_check_annotations_->findKey(pin);
   if (periods == nullptr) {
     periods = new float[ap_count_];
@@ -1057,10 +913,8 @@ void
 Graph::removePeriodCheckAnnotations()
 {
   if (period_check_annotations_) {
-    for (auto pin_floats : *period_check_annotations_) {
-      float *periods = pin_floats.second;
+    for (const auto [pin, periods] : *period_check_annotations_)
       delete [] periods;
-    }
     delete period_check_annotations_;
     period_check_annotations_ = nullptr;
   }
@@ -1104,9 +958,8 @@ Vertex::init(Pin *pin,
   is_bidirect_drvr_ = is_bidirect_drvr;
   in_edges_ = edge_id_null;
   out_edges_ = edge_id_null;
-  arrivals_ = arrival_null;
-  requireds_ = arrival_null;
-  prev_paths_ = prev_path_null;
+  slews_ = nullptr;
+  paths_ = nullptr;
   tag_group_index_ = tag_group_index_max;
   slew_annotated_ = false;
   sim_value_ = unsigned(LogicValue::unknown);
@@ -1116,11 +969,25 @@ Vertex::init(Pin *pin,
   is_check_clk_ = false;
   is_constrained_ = false;
   has_downstream_clk_pin_ = false;
-  color_ = unsigned(LevelColor::white);
   level_ = 0;
+  visited1_ = false;
+  visited2_ = false;
   bfs_in_queue_ = 0;
   crpr_path_pruning_disabled_ = false;
-  requireds_pruned_ = false;
+}
+
+Vertex::~Vertex()
+{
+  clear();
+}
+
+void
+Vertex::clear()
+{
+  delete [] slews_;
+  slews_ = nullptr;
+  delete [] paths_;
+  paths_ = nullptr;
 }
 
 void
@@ -1129,17 +996,25 @@ Vertex::setObjectIdx(ObjectIdx idx)
   object_idx_ = idx;
 }
 
-const char *
-Vertex::name(const Network *network) const
+string
+Vertex::to_string(const StaState *sta) const
 {
+  const Network *network = sta->network();
   if (network->direction(pin_)->isBidirect()) {
-    const char *pin_name = network->pathName(pin_);
-    return stringPrintTmp("%s %s",
-			  pin_name,
-			  is_bidirect_drvr_ ? "driver" : "load");
+    string str = network->pathName(pin_);
+    str += ' ';
+    str += is_bidirect_drvr_ ? "driver" : "load";
+    return str;
   }
   else
     return network->pathName(pin_);
+}
+
+const char *
+Vertex::name(const Network *network) const
+{
+  string name = to_string(network);
+  return makeTmpString(name);  
 }
 
 bool
@@ -1166,9 +1041,22 @@ Vertex::setLevel(Level level)
 }
 
 void
-Vertex::setColor(LevelColor color)
+Vertex::setVisited(bool visited)
 {
-  color_ = unsigned(color);
+  visited1_ = visited;
+}
+
+void
+Vertex::setVisited2(bool visited)
+{
+  visited2_ = visited;
+}
+
+void
+Vertex::setSlews(Slew *slews)
+{
+  delete [] slews_;
+  slews_ = slews;
 }
 
 bool
@@ -1213,12 +1101,6 @@ Vertex::setCrprPathPruningDisabled(bool disabled)
   crpr_path_pruning_disabled_ = disabled;
 }
 
-void
-Vertex::setRequiredsPruned(bool pruned)
-{
-  requireds_pruned_ = pruned;
-}
-
 TagGroupIndex
 Vertex::tagGroupIndex() const
 {
@@ -1232,31 +1114,10 @@ Vertex::setTagGroupIndex(TagGroupIndex tag_index)
 }
 
 void
-Vertex::setArrivals(ArrivalId id)
+Vertex::setPaths(Path *paths)
 {
-  arrivals_ = id;
-}
-
-void
-Vertex::setRequireds(ArrivalId id)
-{
-  requireds_ = id;
-}
-
-void
-Vertex::setPrevPaths(PrevPathId prev_paths)
-{
-  prev_paths_ = prev_paths;
-}
-
-void
-Vertex::deletePaths()
-{
-  arrivals_ = arrival_null;
-  requireds_ = arrival_null;
-  prev_paths_ = prev_path_null;
-  tag_group_index_ = tag_group_index_max;
-  crpr_path_pruning_disabled_ = false;
+  delete [] paths_;
+  paths_ = paths;
 }
 
 LogicValue
@@ -1363,13 +1224,15 @@ Edge::init(VertexId from,
   from_ = from;
   to_ = to;
   arc_set_ = arc_set;
-  arc_delays_ = 0;
-
   vertex_in_link_ = edge_id_null;
   vertex_out_next_ = edge_id_null;
   vertex_out_prev_ = edge_id_null;
   is_bidirect_inst_path_ = false;
   is_bidirect_net_path_ = false;
+
+  arc_delays_ = nullptr;
+  arc_delay_annotated_is_bits_ = true;
+  arc_delay_annotated_.bits_ = 0;
   delay_annotation_is_incremental_ = false;
   sim_timing_sense_ = unsigned(TimingSense::unknown);
   is_disabled_constraint_ = false;
@@ -1377,10 +1240,36 @@ Edge::init(VertexId from,
   is_disabled_loop_ = false;
 }
 
+Edge::~Edge()
+{
+  clear();
+}
+
+void
+Edge::clear()
+{
+  delete [] arc_delays_;
+  arc_delays_ = nullptr;
+  if (!arc_delay_annotated_is_bits_)
+    delete arc_delay_annotated_.seq_;
+  arc_delay_annotated_is_bits_ = true;
+  arc_delay_annotated_.seq_ = nullptr;
+}
+
 void
 Edge::setObjectIdx(ObjectIdx idx)
 {
   object_idx_ = idx;
+}
+
+string
+Edge::to_string(const StaState *sta) const
+{
+  const Graph *graph = sta->graph();
+  string str = from(graph)->to_string(sta);
+  str += " -> ";
+  str += to(graph)->to_string(sta);
+  return str;
 }
 
 void
@@ -1390,15 +1279,57 @@ Edge::setTimingArcSet(TimingArcSet *set)
 }
 
 void
-Edge::setArcDelays(ArcId arc_delays)
+Edge::setArcDelays(ArcDelay *arc_delays)
 {
+  delete [] arc_delays_;
   arc_delays_ = arc_delays;
 }
 
 bool
-Edge::delayAnnotationIsIncremental() const
+Edge::arcDelayAnnotated(const TimingArc *arc,
+                        DcalcAPIndex ap_index,
+                        DcalcAPIndex ap_count) const
 {
-  return delay_annotation_is_incremental_;
+  size_t index = arc->index() * ap_count + ap_index;
+  if (arc_delay_annotated_is_bits_)
+    return arc_delay_annotated_.bits_ & (1 << index);
+  else
+    return (*arc_delay_annotated_.seq_)[index];
+}
+
+void
+Edge::setArcDelayAnnotated(const TimingArc *arc,
+                           DcalcAPIndex ap_index,
+                           DcalcAPIndex ap_count,
+                           bool annotated)
+{
+  size_t index = arc->index() * ap_count + ap_index;
+  if (index > sizeof(intptr_t) * 8
+      && arc_delay_annotated_is_bits_) {
+    arc_delay_annotated_is_bits_ = false;
+    size_t bit_count = ap_count * RiseFall::index_count * 2;
+    arc_delay_annotated_.seq_ = new std::vector<bool>(bit_count);
+  }
+  if (arc_delay_annotated_is_bits_) {
+    if (annotated)
+      arc_delay_annotated_.bits_ |= (1 << index);
+    else
+      arc_delay_annotated_.bits_ &= ~(1 << index);
+  }
+  else
+    (*arc_delay_annotated_.seq_)[index] = annotated;
+}
+
+void
+Edge::removeDelayAnnotated()
+{
+  delay_annotation_is_incremental_ = false;
+  if (arc_delay_annotated_is_bits_)
+    arc_delay_annotated_.bits_ = 0;
+  else {
+    delete arc_delay_annotated_.seq_;
+    arc_delay_annotated_.seq_ = nullptr;
+  }
 }
 
 void
@@ -1407,7 +1338,7 @@ Edge::setDelayAnnotationIsIncremental(bool is_incr)
   delay_annotation_is_incremental_ = is_incr;
 }
 
-TimingRole *
+const TimingRole *
 Edge::role() const
 {
   return arc_set_->role();
@@ -1441,7 +1372,7 @@ Edge::setSimTimingSense(TimingSense sense)
 bool
 Edge::isDisabledConstraint() const
 {
-  TimingRole *role = arc_set_->role();
+  const TimingRole *role = arc_set_->role();
   bool is_wire = role->isWire();
   return is_disabled_constraint_
     || arc_set_->isDisabledConstraint()

@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "VisitPathGroupVertices.hh"
 
@@ -20,21 +28,20 @@
 #include "Graph.hh"
 #include "Bfs.hh"
 #include "Search.hh"
-#include "PathVertex.hh"
+#include "Path.hh"
 #include "PathEnd.hh"
 #include "Tag.hh"
 #include "VisitPathEnds.hh"
 
 namespace sta {
 
-typedef Set<PathVertex*, PathLess> PathVertexSet;
-typedef Map<Vertex*, PathVertexSet*> VertexPathSetMap;
+typedef Set<Path*, PathLess> PathSet;
+typedef Map<Vertex*, PathSet*> VertexPathSetMap;
 
 static void
 vertexPathSetMapInsertPath(VertexPathSetMap *matching_path_map,
 			   Vertex *vertex,
 			   Tag *tag,
-			   int arrival_index,
 			   const StaState *sta);
 
 // Visit each path end for a vertex and add the worst one in each
@@ -79,7 +86,8 @@ protected:
 			       Vertex *from_vertex,
 			       const RiseFall *from_rf,
 			       Tag *from_tag,
-			       PathVertex *from_path,
+			       Path *from_path,
+                               const Arrival &from_arrival,
 			       Edge *edge,
 			       TimingArc *arc,
 			       ArcDelay arc_delay,
@@ -90,8 +98,7 @@ protected:
 			       const MinMax *min_max,
 			       const PathAnalysisPt *path_ap);
   void fromMatches(Vertex *from_vertex,
-		   Tag *from_tag,
-		   int from_arrival_index);
+		   Tag *from_tag);
 
 private:
   VertexVisitor *visitor_;
@@ -130,10 +137,10 @@ visitPathGroupVertices(PathGroup *path_group,
   // Cleanup.
   VertexPathSetMap::Iterator matching_iter(matching_path_map);
   while (matching_iter.hasNext()) {
-    PathVertexSet *paths = matching_iter.next();
-    PathVertexSet::Iterator path_iter(paths);
+    PathSet *paths = matching_iter.next();
+    PathSet::Iterator path_iter(paths);
     while (path_iter.hasNext()) {
-      PathVertex *path = path_iter.next();
+      Path *path = path_iter.next();
       delete path;
     }
     delete paths;
@@ -172,14 +179,9 @@ VisitPathGroupEnds::visit(PathEnd *path_end)
 {
   PathGroup *group = sta_->search()->pathGroup(path_end);
   if (group == path_group_) {
-    PathRef path(path_end->pathRef());
-    Vertex *vertex = path.vertex(sta_);
-
-    int arrival_index;
-    bool arrival_exists;
-    path.arrivalIndex(arrival_index, arrival_exists);
-    vertexPathSetMapInsertPath(matching_path_map_, vertex, path.tag(sta_),
-			       arrival_index, sta_);
+    Path *path = path_end->path();
+    Vertex *vertex = path->vertex(sta_);
+    vertexPathSetMapInsertPath(matching_path_map_, vertex, path->tag(sta_), sta_);
     vertex_matches_ = true;
   }
 }
@@ -188,16 +190,15 @@ static void
 vertexPathSetMapInsertPath(VertexPathSetMap *matching_path_map,
 			   Vertex *vertex,
 			   Tag *tag,
-			   int arrival_index,
 			   const StaState *sta)
 {
-  PathVertexSet *matching_paths = matching_path_map->findKey(vertex);
+  PathSet *matching_paths = matching_path_map->findKey(vertex);
   if (matching_paths == nullptr) {
     PathLess path_less(sta);
-    matching_paths = new PathVertexSet(path_less);
+    matching_paths = new PathSet(path_less);
     (*matching_path_map)[vertex] = matching_paths;
   }
-  PathVertex *vpath = new PathVertex(vertex, tag, arrival_index);
+  Path *vpath = new Path(vertex, tag, sta);
   matching_paths->insert(vpath);
 }
 
@@ -242,7 +243,7 @@ PathGroupPathVisitor::visit(Vertex *vertex)
   visitFanoutPaths(vertex);
   if (vertex_matches_) {
     debugPrint(debug_, "visit_path_group", 1, "visit %s",
-               vertex->name(network_));
+               vertex->to_string(this).c_str());
     visitor_->visit(vertex);
     bkwd_iter_->enqueueAdjacentVertices(vertex);
   }
@@ -253,7 +254,8 @@ PathGroupPathVisitor::visitFromToPath(const Pin *,
 				      Vertex *from_vertex,
 				      const RiseFall *,
 				      Tag *from_tag,
-				      PathVertex *from_path,
+				      Path *,
+                                      const Arrival &,
 				      Edge *,
 				      TimingArc *,
 				      ArcDelay ,
@@ -264,35 +266,32 @@ PathGroupPathVisitor::visitFromToPath(const Pin *,
 				      const MinMax *,
 				      const PathAnalysisPt *path_ap)
 {
-  PathVertexSet *matching_paths = matching_path_map_->findKey(to_vertex);
+  PathSet *matching_paths = matching_path_map_->findKey(to_vertex);
   if (matching_paths) {
-    int arrival_index;
-    bool arrival_exists;
-    from_path->arrivalIndex(arrival_index, arrival_exists);
-    PathVertex to_path(to_vertex, to_tag, this);
+    Path to_path(to_vertex, to_tag, this);
     if (!to_path.isNull()) {
       if (matching_paths->hasKey(&to_path)) {
 	debugPrint(debug_, "visit_path_group", 2, "match %s %s -> %s %s",
-                   from_vertex->name(network_),
-                   from_tag->asString(this),
-                   to_vertex->name(network_),
-                   to_tag->asString(this));
-	fromMatches(from_vertex, from_tag, arrival_index);
+                   from_vertex->to_string(this).c_str(),
+                   from_tag->to_string(this).c_str(),
+                   to_vertex->to_string(this).c_str(),
+                   to_tag->to_string(this).c_str());
+	fromMatches(from_vertex, from_tag);
       }
     }
     else {
       VertexPathIterator to_iter(to_vertex, to_rf, path_ap, this);
       while (to_iter.hasNext()) {
-	PathVertex *to_path = to_iter.next();
+	Path *to_path = to_iter.next();
 	if (tagMatchNoCrpr(to_path->tag(this), to_tag)
 	    && matching_paths->hasKey(to_path)) {
 	  debugPrint(debug_, "visit_path_group", 2, 
                      "match crpr %s %s -> %s %s",
-                     from_vertex->name(network_),
-                     from_tag->asString(this),
-                     to_vertex->name(network_),
-                     to_tag->asString(this));
-	  fromMatches(from_vertex, from_tag, arrival_index);
+                     from_vertex->to_string(this).c_str(),
+                     from_tag->to_string(this).c_str(),
+                     to_vertex->to_string(this).c_str(),
+                     to_tag->to_string(this).c_str());
+	  fromMatches(from_vertex, from_tag);
 	}
       }
     }
@@ -302,12 +301,11 @@ PathGroupPathVisitor::visitFromToPath(const Pin *,
 
 void
 PathGroupPathVisitor::fromMatches(Vertex *from_vertex,
-				  Tag *from_tag,
-				  int from_arrival_index)
+				  Tag *from_tag)
 {
   vertex_matches_ = true;
   vertexPathSetMapInsertPath(matching_path_map_, from_vertex,
-			     from_tag, from_arrival_index, this);
+			     from_tag, this);
 }
 
 } // namespace

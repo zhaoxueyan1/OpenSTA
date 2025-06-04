@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "Sta.hh"
 
@@ -36,6 +44,7 @@
 #include "Graph.hh"
 #include "GraphCmp.hh"
 #include "Sdc.hh"
+#include "Variables.hh"
 #include "WriteSdc.hh"
 #include "ExceptionPath.hh"
 #include "MakeConcreteParasitics.hh"
@@ -73,9 +82,11 @@
 #include "VisitPathEnds.hh"
 #include "PathExpanded.hh"
 #include "MakeTimingModel.hh"
+#include "spice/WritePathSpice.hh"
 
 namespace sta {
 
+using std::string;
 using std::min;
 using std::max;
 
@@ -200,7 +211,8 @@ class StaLevelizeObserver : public LevelizeObserver
 {
 public:
   StaLevelizeObserver(Search *search);
-  virtual void levelChangedBefore(Vertex *vertex);
+  void levelsChangedBefore() override;
+  void levelChangedBefore(Vertex *vertex) override;
 
 private:
   Search *search_;
@@ -209,6 +221,12 @@ private:
 StaLevelizeObserver::StaLevelizeObserver(Search *search) :
   search_(search)
 {
+}
+
+void
+StaLevelizeObserver::levelsChangedBefore()
+{
+  search_->levelsChangedBefore();
 }
 
 void
@@ -223,9 +241,7 @@ void
 initSta()
 {
   initElapsedTime();
-  TimingRole::init();
   PortDirection::init();
-  initTmpStrings();
   initLiberty();
   initDelayConstants();
   registerDelayCalcs();
@@ -235,17 +251,12 @@ initSta()
 void
 deleteAllMemory()
 {
-  // Verilog modules refer to the network in the sta so it has
-  // to deleted before the sta.
-  deleteVerilogReader();
   Sta *sta = Sta::sta();
   if (sta) {
     delete sta;
     Sta::setSta(nullptr);
   }
   deleteDelayCalcs();
-  deleteTmpStrings();
-  TimingRole::destroy();
   PortDirection::destroy();
   deleteLiberty();
 }
@@ -258,6 +269,8 @@ Sta *Sta::sta_;
 Sta::Sta() :
   StaState(),
   current_instance_(nullptr),
+  cmd_corner_(nullptr),
+  verilog_reader_(nullptr),
   check_timing_(nullptr),
   check_slew_limits_(nullptr),
   check_fanout_limits_(nullptr),
@@ -268,18 +281,19 @@ Sta::Sta() :
   clk_skews_(nullptr),
   report_path_(nullptr),
   power_(nullptr),
-  link_make_black_boxes_(true),
   update_genclks_(false),
   equiv_cells_(nullptr),
   graph_sdc_annotated_(false),
   // Default to same parasitics for all corners.
-  parasitics_per_corner_(false)
+  parasitics_per_corner_(false),
+  properties_(this)
 {
 }
 
 void
 Sta::makeComponents()
 {
+  makeVariables();
   makeReport();
   makeDebug();
   makeUnits();
@@ -349,8 +363,7 @@ Sta::updateComponentsState()
   corners_->copyState(this);
   levelize_->copyState(this);
   parasitics_->copyState(this);
-  if (arc_delay_calc_)
-    arc_delay_calc_->copyState(this);
+  arc_delay_calc_->copyState(this);
   sim_->copyState(this);
   search_->copyState(this);
   latches_->copyState(this);
@@ -504,6 +517,12 @@ Sta::makePower()
 }
 
 void
+Sta::makeVariables()
+{
+  variables_ = new Variables();
+}
+
+void
 Sta::setSta(Sta *sta)
 {
   sta_ = sta;
@@ -517,6 +536,10 @@ Sta::sta()
 
 Sta::~Sta()
 {
+  delete variables_;
+  // Verilog modules refer to the network in the sta so it has
+  // to deleted before the network.
+  delete verilog_reader_;
   // Delete "top down" to minimize chance of referencing deleted memory.
   delete check_slew_limits_;
   delete check_fanout_limits_;
@@ -527,12 +550,11 @@ Sta::~Sta()
   delete clk_skews_;
   delete check_timing_;
   delete report_path_;
-  // Constraints reference search filter, so delete search first.
+  // Sdc references search filter, so delete search first.
   delete search_;
   delete latches_;
   delete parasitics_;
-  if (arc_delay_calc_)
-    delete arc_delay_calc_;
+  delete arc_delay_calc_;
   delete graph_delay_calc_;
   delete sim_;
   delete levelize_;
@@ -748,6 +770,20 @@ Sta::setMinLibrary(const char *min_filename,
     return false;
 }
 
+bool
+Sta::readVerilog(const char *filename)
+{
+  NetworkReader *network = networkReader();
+  if (network) {
+    if (verilog_reader_ == nullptr)
+      verilog_reader_ = new VerilogReader(network);
+    readNetlistBefore();
+    return verilog_reader_->read(filename);
+  }
+  else
+    return false;
+}
+
 void
 Sta::readNetlistBefore()
 {
@@ -758,27 +794,16 @@ Sta::readNetlistBefore()
 }
 
 bool
-Sta::linkDesign(const char *top_cell_name)
+Sta::linkDesign(const char *top_cell_name,
+                bool make_black_boxes)
 {
   clear();
   Stats stats(debug_, report_);
   bool status = network_->linkNetwork(top_cell_name,
-				      link_make_black_boxes_,
+				      make_black_boxes,
 				      report_);
   stats.report("Link");
   return status;
-}
-
-bool
-Sta::linkMakeBlackBoxes() const
-{
-  return link_make_black_boxes_;
-}
-
-void
-Sta::setLinkMakeBlackBoxes(bool make)
-{
-  link_make_black_boxes_ = make;
 }
 
 ////////////////////////////////////////////////////////////////
@@ -797,8 +822,7 @@ Sta::setAnalysisType(AnalysisType analysis_type)
 {
   if (analysis_type != sdc_->analysisType()) {
     sdc_->setAnalysisType(analysis_type);
-    graph_delay_calc_->delaysInvalid();
-    search_->arrivalsInvalid();
+    delaysInvalid();
     search_->deletePathGroups();
     corners_->analysisTypeChanged();
     if (graph_)
@@ -818,8 +842,7 @@ Sta::setOperatingConditions(OperatingConditions *op_cond,
 {
   sdc_->setOperatingConditions(op_cond, min_max);
   corners_->operatingConditionsChanged();
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
 }
 
 const Pvt *
@@ -1021,8 +1044,7 @@ void
 Sta::setWireloadMode(WireloadMode mode)
 {
   sdc_->setWireloadMode(mode);
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
 }
 
 void
@@ -1030,8 +1052,7 @@ Sta::setWireload(Wireload *wireload,
 		 const MinMaxAll *min_max)
 {
   sdc_->setWireload(wireload, min_max);
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
 }
 
 void
@@ -1039,8 +1060,7 @@ Sta::setWireloadSelection(WireloadSelection *selection,
 			  const MinMaxAll *min_max)
 {
   sdc_->setWireloadSelection(selection, min_max);
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
 }
 
 void
@@ -1169,8 +1189,7 @@ void
 Sta::setPropagatedClock(Clock *clk)
 {
   sdc_->setPropagatedClock(clk);
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
   clkPinsInvalid();
 }
 
@@ -1178,8 +1197,7 @@ void
 Sta::removePropagatedClock(Clock *clk)
 {
   sdc_->removePropagatedClock(clk);
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
   clkPinsInvalid();
 }
 
@@ -1187,8 +1205,7 @@ void
 Sta::setPropagatedClock(Pin *pin)
 {
   sdc_->setPropagatedClock(pin);
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
   clkPinsInvalid();
 }
 
@@ -1196,8 +1213,7 @@ void
 Sta::removePropagatedClock(Pin *pin)
 {
   sdc_->removePropagatedClock(pin);
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
   clkPinsInvalid();
 }
 
@@ -1630,8 +1646,7 @@ Sta::disableAfter()
 {
   // Levelization respects disabled edges.
   levelize_->invalid();
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
 }
 
 ////////////////////////////////////////////////////////////////
@@ -1696,7 +1711,6 @@ Sta::isDisabledConstant(Edge *edge)
     || (!role->isWire()
 	&& (isCondDisabled(edge, inst, from_pin, to_pin, network_, sim_)
 	    || isModeDisabled(edge, inst, network_, sim_)
-	    || isTestDisabled(inst, from_pin, to_pin, network_, sim_)
 	    || hasDisabledArcs(edge, graph_)));
 }
 
@@ -1716,12 +1730,6 @@ bool
 Sta::isDisabledLoop(Edge *edge) const
 {
   return levelize_->isDisabledLoop(edge);
-}
-
-bool
-Sta::isDisabledCondDefault(Edge *edge)
-{
-  return sdc_->isDisabledCondDefault(edge);
 }
 
 PinSet
@@ -1751,11 +1759,6 @@ Sta::disabledConstantPins(Edge *edge)
 		   is_disabled, disable_cond);
     if (is_disabled)
       exprConstantPins(disable_cond, inst, pins);
-    Pin *scan_enable;
-    isTestDisabled(inst, from_pin, to_pin, network_, sim_,
-		   is_disabled, scan_enable);
-    if (is_disabled)
-      pins.insert(scan_enable);
     if (hasDisabledArcs(edge, graph_)) {
       LibertyPort *to_port = network_->libertyPort(to_pin);
       if (to_port) {
@@ -1798,21 +1801,21 @@ Sta::exprConstantPins(FuncExpr *expr,
 bool
 Sta::isDisabledBidirectInstPath(Edge *edge) const
 {
-  return !sdc_->bidirectInstPathsEnabled()
+  return !variables_->bidirectInstPathsEnabled()
     && edge->isBidirectInstPath();
 }
 
 bool
 Sta::isDisabledBidirectNetPath(Edge *edge) const
 {
-  return !sdc_->bidirectNetPathsEnabled()
+  return !variables_->bidirectNetPathsEnabled()
     && edge->isBidirectNetPath();
 }
 
 bool
 Sta::isDisabledPresetClr(Edge *edge) const
 {
-  return !sdc_->presetClrArcsEnabled()
+  return !variables_->presetClrArcsEnabled()
     && edge->role() == TimingRole::regSetClr();
 }
 
@@ -1858,8 +1861,7 @@ Sta::setLogicValue(Pin *pin,
   // fails.  This could be more incremental if the graph delay
   // calculator searched thru disabled edges but ignored their
   // results.
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
 }
 
 void
@@ -1875,8 +1877,7 @@ Sta::setCaseAnalysis(Pin *pin,
   // simply invaldating the delays downstream from the constant pin
   // fails.  This could be handled incrementally by invalidating delays
   // on the output of gates one level downstream.
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
 }
 
 void
@@ -1891,8 +1892,7 @@ Sta::removeCaseAnalysis(Pin *pin)
   // simply invaldating the delays downstream from the constant pin
   // fails.  This could be handled incrementally by invalidating delays
   // on the output of gates one level downstream.
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
 }
 
 void
@@ -1988,12 +1988,13 @@ Sta::makePathDelay(ExceptionFrom *from,
 		   ExceptionTo *to,
 		   const MinMax *min_max,
 		   bool ignore_clk_latency,
+                   bool break_path,
 		   float delay,
 		   const char *comment)
 {
   sdc_->makePathDelay(from, thrus, to, min_max, 
-		      ignore_clk_latency, delay,
-		      comment);
+		      ignore_clk_latency, break_path,
+                      delay, comment);
   search_->endpointsInvalid();
   search_->arrivalsInvalid();
 }
@@ -2103,7 +2104,7 @@ Sta::makeExceptionTo(PinSet *to_pins,
 		     ClockSet *to_clks,
 		     InstanceSet *to_insts,
 		     const RiseFallBoth *rf,
- 		     RiseFallBoth *end_rf)
+		     const RiseFallBoth *end_rf)
 {
   return sdc_->makeExceptionTo(to_pins, to_clks, to_insts, rf, end_rf);
 }
@@ -2152,8 +2153,7 @@ void
 Sta::constraintsChanged()
 {
   levelize_->invalid();
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
   sim_->constantsInvalid();
 }
 
@@ -2165,6 +2165,7 @@ Sta::writeSdc(const char *filename,
               bool gzip,
 	      bool no_timestamp)
 {
+  ensureLibLinked();
   sta::writeSdc(network_->topInstance(), filename, "write_sdc",
 		leaf, native, digits, gzip, no_timestamp, sdc_);
 }
@@ -2194,10 +2195,12 @@ Sta::checkTiming(bool no_input_delay,
 			      loops, generated_clks);
 }
 
+////////////////////////////////////////////////////////////////
+
 bool
 Sta::crprEnabled() const
 {
-  return sdc_->crprEnabled();
+  return variables_->crprEnabled();
 }
 
 void
@@ -2205,15 +2208,15 @@ Sta::setCrprEnabled(bool enabled)
 {
   // Pessimism is only relevant for on_chip_variation analysis.
   if (sdc_->analysisType() == AnalysisType::ocv
-      && enabled != sdc_->crprEnabled())
+      && enabled != variables_->crprEnabled())
     search_->arrivalsInvalid();
-  sdc_->setCrprEnabled(enabled);
+  variables_->setCrprEnabled(enabled);
 }
 
 CrprMode
 Sta::crprMode() const
 {
-  return sdc_->crprMode();
+  return variables_->crprMode();
 }
 
 void
@@ -2221,27 +2224,24 @@ Sta::setCrprMode(CrprMode mode)
 {
   // Pessimism is only relevant for on_chip_variation analysis.
   if (sdc_->analysisType() == AnalysisType::ocv
-      && sdc_->crprEnabled()
-      && sdc_->crprMode() != mode)
+      && variables_->crprEnabled()
+      && variables_->crprMode() != mode)
     search_->arrivalsInvalid();
-  sdc_->setCrprMode(mode);
+  variables_->setCrprMode(mode);
 }
 
 bool
 Sta::pocvEnabled() const
 {
-  return pocv_enabled_;
+  return variables_->pocvEnabled();
 }
 
 void
 Sta::setPocvEnabled(bool enabled)
 {
-  if (enabled != pocv_enabled_) {
-    graph_delay_calc_->delaysInvalid();
-    search_->arrivalsInvalid();
-  }
-  pocv_enabled_ = enabled;
-  updateComponentsState();
+  if (enabled != variables_->pocvEnabled())
+    delaysInvalid();
+  variables_->setPocvEnabled(enabled);
 }
 
 void
@@ -2257,139 +2257,141 @@ Sta::setSigmaFactor(float factor)
 bool
 Sta::propagateGatedClockEnable() const
 {
-  return sdc_->propagateGatedClockEnable();
+  return variables_->propagateGatedClockEnable();
 }
 
 void
 Sta::setPropagateGatedClockEnable(bool enable)
 {
-  if (sdc_->propagateGatedClockEnable() != enable)
+  if (variables_->propagateGatedClockEnable() != enable)
     search_->arrivalsInvalid();
-  sdc_->setPropagateGatedClockEnable(enable);
+  variables_->setPropagateGatedClockEnable(enable);
 }
 
 bool
 Sta::presetClrArcsEnabled() const
 {
-  return sdc_->presetClrArcsEnabled();
+  return variables_->presetClrArcsEnabled();
 }
 
 void
 Sta::setPresetClrArcsEnabled(bool enable)
 {
-  if (sdc_->presetClrArcsEnabled() != enable) {
+  if (variables_->presetClrArcsEnabled() != enable) {
     levelize_->invalid();
-    graph_delay_calc_->delaysInvalid();
-    search_->arrivalsInvalid();
+    delaysInvalid();
   }
-  sdc_->setPresetClrArcsEnabled(enable);
+  variables_->setPresetClrArcsEnabled(enable);
 }
 
 bool
 Sta::condDefaultArcsEnabled() const
 {
-  return sdc_->condDefaultArcsEnabled();
+  return variables_->condDefaultArcsEnabled();
 }
 
 void
 Sta::setCondDefaultArcsEnabled(bool enabled)
 {
-  if (sdc_->condDefaultArcsEnabled() != enabled) {
-    graph_delay_calc_->delaysInvalid();
-    search_->arrivalsInvalid();
-    sdc_->setCondDefaultArcsEnabled(enabled);
+  if (variables_->condDefaultArcsEnabled() != enabled) {
+    delaysInvalid();
+    variables_->setCondDefaultArcsEnabled(enabled);
   }
 }
 
 bool
 Sta::bidirectInstPathsEnabled() const
 {
-  return sdc_->bidirectInstPathsEnabled();
+  return variables_->bidirectInstPathsEnabled();
 }
 
 void
 Sta::setBidirectInstPathsEnabled(bool enabled)
 {
-  if (sdc_->bidirectInstPathsEnabled() != enabled) {
+  if (variables_->bidirectInstPathsEnabled() != enabled) {
     levelize_->invalid();
-    graph_delay_calc_->delaysInvalid();
-    search_->arrivalsInvalid();
-    sdc_->setBidirectInstPathsEnabled(enabled);
+    delaysInvalid();
+    variables_->setBidirectInstPathsEnabled(enabled);
   }
 }
 
 bool
 Sta::bidirectNetPathsEnabled() const
 {
-  return sdc_->bidirectNetPathsEnabled();
+  return variables_->bidirectNetPathsEnabled();
 }
 
 void
 Sta::setBidirectNetPathsEnabled(bool enabled)
 {
-  if (sdc_->bidirectNetPathsEnabled() != enabled) {
-    graph_delay_calc_->delaysInvalid();
-    search_->arrivalsInvalid();
-    sdc_->setBidirectNetPathsEnabled(enabled);
+  if (variables_->bidirectNetPathsEnabled() != enabled) {
+    delaysInvalid();
+    variables_->setBidirectNetPathsEnabled(enabled);
   }
 }
 
 bool
 Sta::recoveryRemovalChecksEnabled() const
 {
-  return sdc_->recoveryRemovalChecksEnabled();
+  return variables_->recoveryRemovalChecksEnabled();
 } 
 
 void
 Sta::setRecoveryRemovalChecksEnabled(bool enabled)
 {
-  if (sdc_->recoveryRemovalChecksEnabled() != enabled) {
+  if (variables_->recoveryRemovalChecksEnabled() != enabled) {
     search_->arrivalsInvalid();
-    sdc_->setRecoveryRemovalChecksEnabled(enabled);
+    variables_->setRecoveryRemovalChecksEnabled(enabled);
   }
 }
 
 bool
 Sta::gatedClkChecksEnabled() const
 {
-  return sdc_->gatedClkChecksEnabled();
+  return variables_->gatedClkChecksEnabled();
 }
 
 void
 Sta::setGatedClkChecksEnabled(bool enabled)
 {
-  if (sdc_->gatedClkChecksEnabled() != enabled) {
+  if (variables_->gatedClkChecksEnabled() != enabled) {
     search_->arrivalsInvalid();
-    sdc_->setGatedClkChecksEnabled(enabled);
+    variables_->setGatedClkChecksEnabled(enabled);
   }
 }
 
 bool
 Sta::dynamicLoopBreaking() const
 {
-  return sdc_->dynamicLoopBreaking();
+  return variables_->dynamicLoopBreaking();
 }
 
 void
 Sta::setDynamicLoopBreaking(bool enable)
 {
-  if (sdc_->dynamicLoopBreaking() != enable) {
-    sdc_->setDynamicLoopBreaking(enable);
+  if (variables_->dynamicLoopBreaking() != enable) {
+    if (levelize_->levelized()) {
+      if (enable)
+	sdc_->makeLoopExceptions();
+      else
+	sdc_->deleteLoopExceptions();
+    }
     search_->arrivalsInvalid();
+    variables_->setDynamicLoopBreaking(enable);
   }
 }
 
 bool
 Sta::useDefaultArrivalClock() const
 {
-  return sdc_->useDefaultArrivalClock();
+  return variables_->useDefaultArrivalClock();
 }
 
 void
 Sta::setUseDefaultArrivalClock(bool enable)
 {
-  if (sdc_->useDefaultArrivalClock() != enable) {
-    sdc_->setUseDefaultArrivalClock(enable);
+  if (variables_->useDefaultArrivalClock() != enable) {
+    variables_->setUseDefaultArrivalClock(enable);
     search_->arrivalsInvalid();
   }
 }
@@ -2397,27 +2399,27 @@ Sta::setUseDefaultArrivalClock(bool enable)
 bool
 Sta::propagateAllClocks() const
 {
-  return sdc_->propagateAllClocks();
+  return variables_->propagateAllClocks();
 }
 
 void
 Sta::setPropagateAllClocks(bool prop)
 {
-  sdc_->setPropagateAllClocks(prop);
+  variables_->setPropagateAllClocks(prop);
 }
 
 bool
 Sta::clkThruTristateEnabled() const
 {
-  return sdc_->clkThruTristateEnabled();
+  return variables_->clkThruTristateEnabled();
 }
 
 void
 Sta::setClkThruTristateEnabled(bool enable)
 {
-  if (enable != sdc_->clkThruTristateEnabled()) {
+  if (enable != variables_->clkThruTristateEnabled()) {
     search_->arrivalsInvalid();
-    sdc_->setClkThruTristateEnabled(enable);
+    variables_->setClkThruTristateEnabled(enable);
   }
 }
 
@@ -2485,8 +2487,8 @@ Sta::findPathEnds(ExceptionFrom *from,
 		  bool unconstrained,
 		  const Corner *corner,
 		  const MinMaxAll *min_max,
-		  int group_count,
-		  int endpoint_count,
+		  int group_path_count,
+		  int endpoint_path_count,
 		  bool unique_pins,
 		  float slack_min,
 		  float slack_max,
@@ -2501,7 +2503,7 @@ Sta::findPathEnds(ExceptionFrom *from,
 {
   searchPreamble();
   return search_->findPathEnds(from, thrus, to, unconstrained,
-			       corner, min_max, group_count, endpoint_count,
+			       corner, min_max, group_path_count, endpoint_path_count,
 			       unique_pins, slack_min, slack_max,
 			       sort_by_slack, group_names,
 			       setup, hold,
@@ -2525,6 +2527,8 @@ Sta::searchPreamble()
   findDelays();
   updateGeneratedClks();
   sdc_->searchPreamble();
+  // Delete results from last findPathEnds because they point to filtered arrivals.
+  search_->deletePathGroups();
   search_->deleteFilteredArrivals();
 }
 
@@ -2542,13 +2546,16 @@ Sta::setReportPathFieldOrder(StringSeq *field_names)
 
 void
 Sta::setReportPathFields(bool report_input_pin,
+                         bool report_hier_pins,
 			 bool report_net,
 			 bool report_cap,
 			 bool report_slew,
-                         bool report_fanout)
+			 bool report_fanout,
+			 bool report_src_attr)
 {
-  report_path_->setReportFields(report_input_pin, report_net, report_cap,
-				report_slew, report_fanout);
+  report_path_->setReportFields(report_input_pin, report_hier_pins, report_net,
+                                report_cap, report_slew, report_fanout,
+                                report_src_attr);
 }
 
 ReportField *
@@ -2576,12 +2583,6 @@ Sta::setReportPathSigmas(bool report_sigmas)
 }
 
 void
-Sta::reportPathEnds(PathEndSeq *ends)
-{
-  report_path_->reportPathEnds(ends);
-}
-
-void
 Sta::reportPathEndHeader()
 {
   report_path_->reportPathEndHeader();
@@ -2601,13 +2602,20 @@ Sta::reportPathEnd(PathEnd *end)
 
 void
 Sta::reportPathEnd(PathEnd *end,
-		   PathEnd *prev_end)
+		   PathEnd *prev_end,
+                   bool last)
 {
-  report_path_->reportPathEnd(end, prev_end);
+  report_path_->reportPathEnd(end, prev_end, last);
 }
 
 void
-Sta::reportPath(Path *path)
+Sta::reportPathEnds(PathEndSeq *ends)
+{
+  report_path_->reportPathEnds(ends);
+}
+
+void
+Sta::reportPath(const Path *path)
 {
   report_path_->reportPath(path);
 }
@@ -2677,7 +2685,7 @@ Sta::findClkDelays(const Clock *clk,
 ////////////////////////////////////////////////////////////////
 
 void
-Sta::delaysInvalid()
+Sta::delaysInvalid() const
 {
   graph_delay_calc_->delaysInvalid();
   search_->arrivalsInvalid();
@@ -2745,7 +2753,7 @@ Sta::findGroupPathPins(const char *group_path_name)
                                         nullptr, nullptr, nullptr, false,
                                         // corner, min_max, 
                                         nullptr, MinMaxAll::max(),
-                                        // group_count, endpoint_count, unique_pins
+                                        // group_path_count, endpoint_path_count, unique_pins
                                         1, 1, false,
                                         -INF, INF, // slack_min, slack_max,
                                         false, // sort_by_slack
@@ -2792,82 +2800,82 @@ Sta::vertexPathIterator(Vertex *vertex,
   return new VertexPathIterator(vertex, rf, min_max, this);
 }
 
-PathRef
+Path *
 Sta::vertexWorstArrivalPath(Vertex *vertex,
 			    const MinMax *min_max)
 {
   return vertexWorstArrivalPath(vertex, nullptr, min_max);
 }
 
-PathRef
+Path *
 Sta::vertexWorstArrivalPath(Vertex *vertex,
 			    const RiseFall *rf,
 			    const MinMax *min_max)
 {
-  PathRef worst_path;
+  Path *worst_path = nullptr;
   Arrival worst_arrival = min_max->initValue();
   VertexPathIterator path_iter(vertex, rf, min_max, this);
   while (path_iter.hasNext()) {
-    PathVertex *path = path_iter.next();
-    Arrival arrival = path->arrival(this);
+    Path *path = path_iter.next();
+    Arrival arrival = path->arrival();
     if (!path->tag(this)->isGenClkSrcPath()
 	&& delayGreater(arrival, worst_arrival, min_max, this)) {
       worst_arrival = arrival;
-      worst_path.init(path);
+      worst_path = path;
     }
   }
   return worst_path;
 }
 
-PathRef
+Path *
 Sta::vertexWorstRequiredPath(Vertex *vertex,
                              const MinMax *min_max)
 {
   return vertexWorstRequiredPath(vertex, nullptr, min_max);
 }
 
-PathRef
+Path *
 Sta::vertexWorstRequiredPath(Vertex *vertex,
                              const RiseFall *rf,
                              const MinMax *min_max)
 {
-  PathRef worst_path;
+  Path *worst_path = nullptr;
   const MinMax *req_min_max = min_max->opposite();
   Arrival worst_req = req_min_max->initValue();
   VertexPathIterator path_iter(vertex, rf, min_max, this);
   while (path_iter.hasNext()) {
-    PathVertex *path = path_iter.next();
-    const Required path_req = path->required(this);
+    Path *path = path_iter.next();
+    const Required path_req = path->required();
     if (!path->tag(this)->isGenClkSrcPath()
 	&& delayGreater(path_req, worst_req, req_min_max, this)) {
       worst_req = path_req;
-      worst_path.init(path);
+      worst_path = path;
     }
   }
   return worst_path;
 }
 
-PathRef
+Path *
 Sta::vertexWorstSlackPath(Vertex *vertex,
 			  const RiseFall *rf,
 			  const MinMax *min_max)
 {
-  PathRef worst_path;
+  Path *worst_path = nullptr;
   Slack min_slack = MinMax::min()->initValue();
   VertexPathIterator path_iter(vertex, rf, min_max, this);
   while (path_iter.hasNext()) {
-    PathVertex *path = path_iter.next();
+    Path *path = path_iter.next();
     Slack slack = path->slack(this);
     if (!path->tag(this)->isGenClkSrcPath()
 	&& delayLess(slack, min_slack, this)) {
       min_slack = slack;
-      worst_path.init(path);
+      worst_path = path;
     }
   }
   return worst_path;
 }
 
-PathRef
+Path *
 Sta::vertexWorstSlackPath(Vertex *vertex,
 			  const MinMax *min_max)
 
@@ -2898,7 +2906,7 @@ Arrival
 Sta::vertexArrival(Vertex *vertex,
                    const MinMax *min_max)
 {
-  return vertexArrival(vertex, nullptr, nullptr, nullptr, min_max);
+  return vertexArrival(vertex, nullptr, clk_edge_wildcard, nullptr, min_max);
 }
 
 Arrival
@@ -2924,12 +2932,12 @@ Sta::vertexArrival(Vertex *vertex,
   VertexPathIterator path_iter(vertex, rf, path_ap, this);
   while (path_iter.hasNext()) {
     Path *path = path_iter.next();
-    const Arrival &path_arrival = path->arrival(this);
+    const Arrival &path_arrival = path->arrival();
     ClkInfo *clk_info = path->clkInfo(search_);
     if ((clk_edge == clk_edge_wildcard
 	 || clk_info->clkEdge() == clk_edge)
 	&& !clk_info->isGenClkSrcPath()
-	&& delayGreater(path->arrival(this), arrival, min_max, this))
+	&& delayGreater(path->arrival(), arrival, min_max, this))
       arrival = path_arrival;
   }
   return arrival;
@@ -2982,7 +2990,7 @@ Sta::vertexRequired(Vertex *vertex,
   VertexPathIterator path_iter(vertex, rf, path_ap, min_max, this);
   while (path_iter.hasNext()) {
     const Path *path = path_iter.next();
-    const Required path_required = path->required(this);
+    const Required path_required = path->required();
     if ((clk_edge == clk_edge_wildcard
 	 || path->clkEdge(search_) == clk_edge)
 	&& delayGreater(path_required, required, req_min_max, this))
@@ -3052,7 +3060,7 @@ Sta::vertexSlack(Vertex *vertex,
 		 const MinMax *min_max)
 {
   findRequired(vertex);
-  MinMax *min = MinMax::min();
+  const MinMax *min = MinMax::min();
   Slack slack = min->initValue();
   VertexPathIterator path_iter(vertex, this);
   while (path_iter.hasNext()) {
@@ -3108,7 +3116,7 @@ Sta::vertexSlack1(Vertex *vertex,
 		  const ClockEdge *clk_edge,
 		  const PathAnalysisPt *path_ap)
 {
-  MinMax *min = MinMax::min();
+  const MinMax *min = MinMax::min();
   Slack slack = min->initValue();
   VertexPathIterator path_iter(vertex, rf, path_ap, this);
   while (path_iter.hasNext()) {
@@ -3127,8 +3135,8 @@ Sta::vertexSlacks(Vertex *vertex,
 		  Slack (&slacks)[RiseFall::index_count][MinMax::index_count])
 {
   findRequired(vertex);
-  for(int rf_index : RiseFall::rangeIndex()) {
-    for(MinMax *min_max : MinMax::range()) {
+  for (int rf_index : RiseFall::rangeIndex()) {
+    for (const MinMax *min_max : MinMax::range()) {
       slacks[rf_index][min_max->index()] = MinMax::min()->initValue();
     }
   }
@@ -3210,7 +3218,7 @@ bool
 MinPeriodEndVisitor::pathIsFromInputPort(PathEnd *path_end)
 {
   PathExpanded expanded(path_end->path(), sta_);
-  PathRef *start = expanded.startPath();
+  const Path *start = expanded.startPath();
   Graph *graph = sta_->graph();
   const Pin *first_pin = start->pin(graph);
   Network *network = sta_->network();
@@ -3240,20 +3248,19 @@ Sta::findRequired(Vertex *vertex)
   searchPreamble();
   search_->findAllArrivals();
   search_->findRequireds(vertex->level());
-  if (sdc_->crprEnabled()
+  if (variables_->crprEnabled()
       && search_->crprPathPruningEnabled()
       && !search_->crprApproxMissingRequireds()
-      // Clocks invariably have requireds that are pruned but isn't
+      // Clocks invariably have requireds that are pruned but it isn't
       // worth finding arrivals and requireds all over again for
       // the entire fanout of the clock.
-      && !search_->isClock(vertex)
-      && vertex->requiredsPruned()) {
+      && !search_->isClock(vertex)) {
     // Invalidate arrivals and requireds and disable
     // path pruning on fanout vertices with DFS.
     int fanout = 0;
     disableFanoutCrprPruning(vertex, fanout);
     debugPrint(debug_, "search", 1, "resurrect pruned required %s fanout %d",
-               vertex->name(sdc_network_),
+               vertex->to_string(this).c_str(),
                fanout);
     // Find fanout arrivals and requireds with pruning disabled.
     search_->findArrivals();
@@ -3348,8 +3355,7 @@ Sta::setArcDelayCalc(const char *delay_calc_name)
   arc_delay_calc_ = makeDelayCalc(delay_calc_name, sta_);
   // Update pointers to arc_delay_calc.
   updateComponentsState();
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
 }
 
 void
@@ -3376,6 +3382,7 @@ Sta::findDelays(Level level)
 void
 Sta::delayCalcPreamble()
 {
+  ensureLibLinked();
   ensureClkNetwork();
 }
 
@@ -3469,9 +3476,34 @@ Sta::vertexSlew(Vertex *vertex,
 
 ////////////////////////////////////////////////////////////////
 
+// Make sure the network has been read and linked.
+// Throwing an error means the caller doesn't have to check the result.
+Network *
+Sta::ensureLinked()
+{
+  if (network_ == nullptr || !network_->isLinked())
+    report_->error(1570, "No network has been linked.");
+  // Return cmd/sdc network.
+  return cmd_network_;
+}
+
+Network *
+Sta::ensureLibLinked()
+{
+  if (network_ == nullptr || !network_->isLinked())
+    report_->error(1571, "No network has been linked.");
+  // OpenROAD db is inherently linked but may not have associated
+  // liberty files so check for them here.
+  if (network_->defaultLibertyLibrary() == nullptr)
+    report_->error(2141, "No liberty libraries found.");
+  // Return cmd/sdc network.
+  return cmd_network_;
+}
+
 Graph *
 Sta::ensureGraph()
 {
+  ensureLibLinked();
   if (graph_ == nullptr && network_) {
     makeGraph();
     // Update pointers to graph.
@@ -3483,7 +3515,7 @@ Sta::ensureGraph()
 void
 Sta::makeGraph()
 {
-  graph_ = new Graph(this, 2, true, corners_->dcalcAnalysisPtCount());
+  graph_ = new Graph(this, 2, corners_->dcalcAnalysisPtCount());
   graph_->makeGraph();
 }
 
@@ -3528,7 +3560,7 @@ Sta::vertexLevel(Vertex *vertex)
   return vertex->level();
 }
 
-GraphLoopSeq *
+GraphLoopSeq &
 Sta::graphLoops()
 {
   ensureLevelized();
@@ -3548,14 +3580,14 @@ Sta::pathDcalcAnalysisPt(Path *path)
 }
 
 Vertex *
-Sta::maxArrivalCountVertex() const
+Sta::maxPathCountVertex() const
 {
   Vertex *max_vertex = nullptr;
   int max_count = 0;
   VertexIterator vertex_iter(graph_);
   while (vertex_iter.hasNext()) {
     Vertex *vertex = vertex_iter.next();
-    int count = vertexArrivalCount(vertex);
+    int count = vertexPathCount(vertex);
     if (count > max_count) {
       max_count = count;
       max_vertex = vertex;
@@ -3565,36 +3597,23 @@ Sta::maxArrivalCountVertex() const
 }
 
 int
-Sta::vertexArrivalCount(Vertex  *vertex) const
+Sta::vertexPathCount(Vertex  *vertex) const
 {
   TagGroup *tag_group = search_->tagGroup(vertex);
   if (tag_group)
-    return tag_group->arrivalCount();
+    return tag_group->pathCount();
   else
     return 0;
 }
 
 int
-Sta::arrivalCount() const
+Sta::pathCount() const
 {
   int count = 0;
   VertexIterator vertex_iter(graph_);
   while (vertex_iter.hasNext()) {
     Vertex *vertex = vertex_iter.next();
-    count += vertexArrivalCount(vertex);
-  }
-  return count;
-}
-
-int
-Sta::requiredCount() const
-{
-  int count = 0;
-  VertexIterator vertex_iter(graph_);
-  while (vertex_iter.hasNext()) {
-    Vertex *vertex = vertex_iter.next();
-    if (vertex->hasRequireds())
-      count += vertexArrivalCount(vertex);
+    count += vertexPathCount(vertex);
   }
   return count;
 }
@@ -3624,7 +3643,8 @@ Sta::setArcDelay(Edge *edge,
 		 const MinMaxAll *min_max,
 		 ArcDelay delay)
 {
-  for (MinMax *mm : min_max->range()) {
+  ensureGraph();
+  for (const MinMax *mm : min_max->range()) {
     const DcalcAnalysisPt *dcalc_ap = corner->findDcalcAnalysisPt(mm);
     DcalcAPIndex ap_index = dcalc_ap->index();
     graph_->setArcDelay(edge, arc, ap_index, delay);
@@ -3646,10 +3666,11 @@ Sta::setAnnotatedSlew(Vertex *vertex,
 		      const RiseFallBoth *rf,
 		      float slew)
 {
-  for (MinMax *mm : min_max->range()) {
+  ensureGraph();
+  for (const MinMax *mm : min_max->range()) {
     const DcalcAnalysisPt *dcalc_ap = corner->findDcalcAnalysisPt(mm);
     DcalcAPIndex ap_index = dcalc_ap->index();
-    for (RiseFall *rf1 : rf->range()) {
+    for (const RiseFall *rf1 : rf->range()) {
       graph_->setSlew(vertex, rf1, ap_index, slew);
       // Don't let delay calculation clobber the value.
       vertex->setSlewAnnotated(true, rf1, ap_index);
@@ -3660,7 +3681,7 @@ Sta::setAnnotatedSlew(Vertex *vertex,
 
 void
 Sta::writeSdf(const char *filename,
-	      Corner *corner,
+	      const Corner *corner,
 	      char divider,
 	      bool include_typ,
               int digits,
@@ -3676,8 +3697,10 @@ Sta::writeSdf(const char *filename,
 void
 Sta::removeDelaySlewAnnotations()
 {
-  graph_->removeDelaySlewAnnotations();
-  graph_delay_calc_->delaysInvalid();
+  if (graph_) {
+    graph_->removeDelaySlewAnnotations();
+    delaysInvalid();
+  }
 }
 
 LogicValue
@@ -3708,10 +3731,10 @@ Sta::setPortExtPinCap(const Port *port,
 		      const MinMaxAll *min_max,
 		      float cap)
 {
-  for (RiseFall *rf1 : rf->range()) {
-    for (MinMax *mm : min_max->range()) {
+  for (const RiseFall *rf1 : rf->range()) {
+    for (const MinMax *mm : min_max->range()) {
       if (corner == nullptr) {
-        for (Corner *corner : *corners_)
+        for (const Corner *corner : *corners_)
           sdc_->setPortExtPinCap(port, rf1, corner, mm, cap);
       }
       else
@@ -3735,7 +3758,7 @@ Sta::portExtCaps(const Port *port,
   pin_cap = min_max->initValue();
   wire_cap = min_max->initValue();
   fanout = min_max->initValueInt();
-  for (RiseFall *rf : RiseFall::range()) {
+  for (const RiseFall *rf : RiseFall::range()) {
     float pin_cap1, wire_cap1;
     int fanout1;
     bool pin_exists1, wire_exists1, fanout_exists1;
@@ -3772,10 +3795,10 @@ Sta::setPortExtWireCap(const Port *port,
 		       const MinMaxAll *min_max,
 		       float cap)
 {
-  for (RiseFall *rf1 : rf->range()) {
-    for (MinMax *mm : min_max->range()) {
+  for (const RiseFall *rf1 : rf->range()) {
+    for (const MinMax *mm : min_max->range()) {
       if (corner == nullptr) {
-        for (Corner *corner : *corners_)
+        for (const Corner *corner : *corners_)
           sdc_->setPortExtWireCap(port, subtract_pin_cap, rf1, corner, mm, cap);
       }
       else
@@ -3789,7 +3812,7 @@ void
 Sta::removeNetLoadCaps() const
 {
   sdc_->removeNetLoadCaps();
-  graph_delay_calc_->delaysInvalid();
+  delaysInvalid();
 }
 
 void
@@ -3798,9 +3821,9 @@ Sta::setPortExtFanout(const Port *port,
                       const Corner *corner,
 		      const MinMaxAll *min_max)
 {
-  for (MinMax *mm : min_max->range()) {
+  for (const MinMax *mm : min_max->range()) {
     if (corner == nullptr) {
-      for (Corner *corner : *corners_)
+      for (const Corner *corner : *corners_)
         sdc_->setPortExtFanout(port, corner, mm, fanout);
     }
     else
@@ -3816,9 +3839,9 @@ Sta::setNetWireCap(const Net *net,
 		   const MinMaxAll *min_max,
 		   float cap)
 {
-  for (MinMax *mm : min_max->range()) {
+  for (const MinMax *mm : min_max->range()) {
     if (corner == nullptr) {
-      for (Corner *corner : *corners_)
+      for (const Corner *corner : *corners_)
         sdc_->setNetWireCap(net, subtract_pin_cap, corner, mm, cap);
     }
     else
@@ -3851,7 +3874,7 @@ Sta::connectedCap(const Net *net,
     pin_cap = min_max->initValue();
     wire_cap = min_max->initValue();
     for (const Corner *corner : makeCornerSeq(corner)) {
-      for (RiseFall *rf : RiseFall::range()) {
+      for (const RiseFall *rf : RiseFall::range()) {
         float pin_cap1, wire_cap1;
         connectedCap(drvr_pin, rf, corner, min_max, pin_cap1, wire_cap1);
         pin_cap = min_max->minMax(pin_cap, pin_cap1);
@@ -3885,7 +3908,7 @@ Sta::capacitance(const LibertyPort *port,
   float cap = min_max->initValue();
   for (const Corner *corner : makeCornerSeq(corner)) {
     const LibertyPort *corner_port = port->cornerPort(corner, min_max);
-    for (RiseFall *rf : RiseFall::range())
+    for (const RiseFall *rf : RiseFall::range())
       cap = min_max->minMax(cap, corner_port->capacitance(rf, min_max, op_cond, op_cond));
   }
   return cap;
@@ -3931,6 +3954,7 @@ Sta::readSpef(const char *filename,
 	      float coupling_cap_factor,
 	      bool reduce)
 {
+  ensureLibLinked();
   setParasiticAnalysisPts(corner != nullptr);
   const MinMax *ap_min_max = (min_max == MinMaxAll::all())
     ? MinMax::max()
@@ -3941,8 +3965,7 @@ Sta::readSpef(const char *filename,
 			      pin_cap_included, keep_coupling_caps,
                               coupling_cap_factor, reduce,
 			      corner, min_max, this);
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
   return success;
 }
 
@@ -3966,6 +3989,7 @@ void
 Sta::reportParasiticAnnotation(bool report_unannotated,
                                const Corner *corner)
 {
+  ensureLibLinked();
   ensureGraph();
   sta::reportParasiticAnnotation(report_unannotated, corner, this);
 }
@@ -3998,8 +4022,8 @@ Sta::makePiElmore(Pin *drvr_pin,
 		  float rpi,
 		  float c1)
 {
-  Corner *corner = cmd_corner_;
-  for (MinMax *mm : min_max->range()) {
+  const Corner *corner = cmd_corner_;
+  for (const MinMax *mm : min_max->range()) {
     ParasiticAnalysisPt *ap = corner->findParasiticAnalysisPt(mm);
     parasitics_->makePiElmore(drvr_pin, rf, ap, c2, rpi, c1);
   }
@@ -4030,8 +4054,8 @@ Sta::setElmore(Pin *drvr_pin,
 	       const MinMaxAll *min_max,
 	       float elmore)
 {
-  Corner *corner = cmd_corner_;
-  for (MinMax *mm : min_max->range()) {
+  const Corner *corner = cmd_corner_;
+  for (const MinMax *mm : min_max->range()) {
     const ParasiticAnalysisPt *ap = corner->findParasiticAnalysisPt(mm);
     Parasitic *pi_elmore = parasitics_->findPiElmore(drvr_pin, rf, ap);
     if (pi_elmore)
@@ -4044,8 +4068,7 @@ void
 Sta::deleteParasitics()
 {
   parasitics_->deleteParasitics();
-  graph_delay_calc_->delaysInvalid();
-  search_->arrivalsInvalid();
+  delaysInvalid();
 }
 
 Parasitic *
@@ -4179,19 +4202,18 @@ Sta::disconnectPin(Pin *pin)
 
 void
 Sta::makePortPin(const char *port_name,
-                 const char *direction)
+                 PortDirection *dir)
 {
+  ensureLinked();
   NetworkReader *network = dynamic_cast<NetworkReader*>(network_);
   Instance *top_inst = network->topInstance();
   Cell *top_cell = network->cell(top_inst);
   Port *port = network->makePort(top_cell, port_name);
-  PortDirection *dir = PortDirection::find(direction);
-  if (dir)
-    network->setDirection(port, dir);
+  network->setDirection(port, dir);
   Pin *pin = network->makePin(top_inst, port, nullptr);
   makePortPinAfter(pin);
 }
-
+ 
 ////////////////////////////////////////////////////////////////
 //
 // Network edit before/after methods.
@@ -4201,6 +4223,8 @@ Sta::makePortPin(const char *port_name,
 void
 Sta::makeInstanceAfter(const Instance *inst)
 {
+  debugPrint(debug_, "network_edit", 1, "make instance %s",
+             sdc_network_->pathName(inst));
   if (graph_) {
     LibertyCell *lib_cell = network_->libertyCell(inst);
     if (lib_cell) {
@@ -4373,6 +4397,9 @@ Sta::replaceCellAfter(const Instance *inst)
 void
 Sta::connectPinAfter(const Pin *pin)
 {
+  debugPrint(debug_, "network_edit", 1, "connect %s to %s",
+             sdc_network_->pathName(pin),
+             sdc_network_->pathName(network_->net(pin)));
   if (graph_) {
     if (network_->isHierarchical(pin)) {
       graph_->makeWireEdgesThruPin(pin);
@@ -4459,6 +4486,9 @@ Sta::connectLoadPinAfter(Vertex *vertex)
 void
 Sta::disconnectPinBefore(const Pin *pin)
 {
+  debugPrint(debug_, "network_edit", 1, "disconnect %s from %s",
+             sdc_network_->pathName(pin),
+             sdc_network_->pathName(network_->net(pin)));
   parasitics_->disconnectPinBefore(pin, network_);
   sdc_->disconnectPinBefore(pin);
   sim_->disconnectPinBefore(pin);
@@ -4506,10 +4536,11 @@ Sta::disconnectPinBefore(const Pin *pin)
 void
 Sta::deleteEdge(Edge *edge)
 {
-  Vertex *from = edge->from(graph_);
+  debugPrint(debug_, "network_edit", 1, "delete edge %s -> %s",
+             edge->from(graph_)->name(sdc_network_),
+             edge->to(graph_)->name(sdc_network_));
   Vertex *to = edge->to(graph_);
-  search_->arrivalInvalid(to);
-  search_->requiredInvalid(from);
+  search_->deleteEdgeBefore(edge);
   graph_delay_calc_->delayInvalid(to);
   levelize_->relevelizeFrom(to);
   levelize_->deleteEdgeBefore(edge);
@@ -4520,6 +4551,8 @@ Sta::deleteEdge(Edge *edge)
 void
 Sta::deleteNetBefore(const Net *net)
 {
+  debugPrint(debug_, "network_edit", 1, "delete net %s",
+             sdc_network_->pathName(net));
   if (graph_) {
     NetConnectedPinIterator *pin_iter = network_->connectedPinIterator(net);
     while (pin_iter->hasNext()) {
@@ -4546,6 +4579,8 @@ Sta::deleteNetBefore(const Net *net)
 void
 Sta::deleteInstanceBefore(const Instance *inst)
 {
+  debugPrint(debug_, "network_edit", 1, "delete instance %s",
+             sdc_network_->pathName(inst));
   if (network_->isLeaf(inst)) {
     deleteInstancePinsBefore(inst);
     deleteLeafInstanceBefore(inst);
@@ -4565,6 +4600,7 @@ void
 Sta::deleteLeafInstanceBefore(const Instance *inst)
 {
   sim_->deleteInstanceBefore(inst);
+  sdc_->deleteInstanceBefore(inst);
 }
 
 void
@@ -4594,7 +4630,7 @@ Sta::deletePinBefore(const Pin *pin)
           Edge *edge = in_edge_iter.next();
           if (edge->role()->isWire()) {
             Vertex *from = edge->from(graph_);
-            // Only notify from vertex (to vertex will be deleted).
+            // Only notify to_vertex (from_vertex will be deleted).
             search_->requiredInvalid(from);
           }
           levelize_->deleteEdgeBefore(edge);
@@ -4615,8 +4651,7 @@ Sta::deletePinBefore(const Pin *pin)
           if (edge->role()->isWire()) {
             // Only notify to vertex (from will be deleted).
             Vertex *to = edge->to(graph_);
-            // to->prev_paths point to vertex, so delete them.
-            search_->arrivalInvalidDelete(to);
+            search_->arrivalInvalid(to);
             graph_delay_calc_->delayInvalid(to);
             levelize_->relevelizeFrom(to);
           }
@@ -4814,6 +4849,7 @@ Sta::findRegisterOutputPins(ClockSet *clks,
 void
 Sta::findRegisterPreamble()
 {
+  ensureLibLinked();
   ensureGraph();
   ensureGraphSdcAnnotated();
   sim_->ensureConstantsPropagated();
@@ -4862,12 +4898,11 @@ FanInOutSrchPred::searchFrom(const Vertex *from_vertex)
 bool
 FanInOutSrchPred::searchThru(Edge *edge)
 {
-  const Sdc *sdc = sta_->sdc();
   return searchThruRole(edge)
     && (thru_disabled_
 	|| !(edge->isDisabledConstraint()
 	     || edge->isDisabledCond()
-	     || sdc->isDisabledCondDefault(edge)))
+	     || sta_->isDisabledCondDefault(edge)))
     && (thru_constants_
 	|| edge->simTimingSense() != TimingSense::none);
 }
@@ -4875,7 +4910,7 @@ FanInOutSrchPred::searchThru(Edge *edge)
 bool
 FanInOutSrchPred::searchThruRole(Edge *edge)
 {
-  TimingRole *role = edge->role();
+  const TimingRole *role = edge->role();
   return role == TimingRole::wire()
     || role == TimingRole::combinational()
     || role == TimingRole::tristateEnable()
@@ -4924,7 +4959,7 @@ FaninSrchPred::FaninSrchPred(bool thru_disabled,
 bool
 FaninSrchPred::searchThruRole(Edge *edge)
 {
-  TimingRole *role = edge->role();
+  const TimingRole *role = edge->role();
   return role == TimingRole::wire()
     || role == TimingRole::combinational()
     || role == TimingRole::tristateEnable()
@@ -5000,7 +5035,7 @@ Sta::findFaninPins(Vertex *to,
 		   int pin_level)
 {
   debugPrint(debug_, "fanin", 1, "%s",
-             to->name(sdc_network_));
+             to->to_string(this).c_str());
   if (!visited.hasKey(to)) {
     visited.insert(to);
     Pin *to_pin = to->pin();
@@ -5110,7 +5145,7 @@ Sta::findFanoutPins(Vertex *from,
 		    int pin_level)
 {
   debugPrint(debug_, "fanout", 1, "%s",
-             from->name(sdc_network_));
+             from->to_string(this).c_str());
   if (!visited.hasKey(from)) {
     visited.insert(from);
     if (!search_->isEndpoint(from, pred)
@@ -5670,6 +5705,8 @@ Sta::writeTimingModel(const char *lib_name,
                       const char *filename,
                       const Corner *corner)
 {
+  ensureLibLinked();
+  ensureGraph();
   LibertyLibrary *library = makeTimingModel(lib_name, cell_name, filename,
                                             corner, this);
   writeLiberty(library, filename, this);
@@ -5680,6 +5717,7 @@ Sta::writeTimingModel(const char *lib_name,
 void
 Sta::powerPreamble()
 {
+  ensureLibLinked();
   // Use arrivals to find clocking info.
   searchPreamble();
   search_->findAllArrivals();
@@ -5709,10 +5747,28 @@ Sta::power(const Instance *inst,
 }
 
 PwrActivity
-Sta::findClkedActivity(const Pin *pin)
+Sta::activity(const Pin *pin)
 {
   powerPreamble();
-  return power_->findClkedActivity(pin);
+  return power_->pinActivity(pin);
+}
+
+////////////////////////////////////////////////////////////////
+
+void
+Sta::writePathSpice(Path *path,
+                    const char *spice_filename,
+                    const char *subckt_filename,
+                    const char *lib_subckt_filename,
+                    const char *model_filename,
+                    const char *power_name,
+                    const char *gnd_name,
+                    CircuitSim ckt_sim)
+{
+  ensureLibLinked();
+  sta::writePathSpice(path, spice_filename, subckt_filename,
+                      lib_subckt_filename, model_filename,
+                      power_name, gnd_name, ckt_sim, this);
 }
 
 ////////////////////////////////////////////////////////////////

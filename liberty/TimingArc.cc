@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "TimingModel.hh"
 
@@ -21,9 +29,12 @@
 #include "TimingRole.hh"
 #include "Liberty.hh"
 #include "TimingArc.hh"
+#include "DcalcAnalysisPt.hh"
+#include "TableModel.hh"
 
 namespace sta {
 
+using std::string;
 using std::make_shared;
 
 static bool
@@ -178,7 +189,7 @@ TimingArcSet::TimingArcSet(LibertyCell *cell,
 			   LibertyPort *from,
 			   LibertyPort *to,
 			   LibertyPort *related_out,
-			   TimingRole *role,
+			   const TimingRole *role,
 			   TimingArcAttrsPtr attrs) :
   from_(from),
   to_(to),
@@ -194,7 +205,7 @@ TimingArcSet::TimingArcSet(LibertyCell *cell,
 {
 }
 
-TimingArcSet::TimingArcSet(TimingRole *role,
+TimingArcSet::TimingArcSet(const TimingRole *role,
                            TimingArcAttrsPtr attrs) :
   from_(nullptr),
   to_(nullptr),
@@ -282,7 +293,7 @@ TimingArcSet::findTimingArc(unsigned arc_index)
 }
 
 void
-TimingArcSet::setRole(TimingRole *role)
+TimingArcSet::setRole(const TimingRole *role)
 {
   role_ = role;
 }
@@ -299,9 +310,9 @@ TimingArcSet::arcsFrom(const RiseFall *from_rf,
 		       TimingArc *&arc1,
 		       TimingArc *&arc2) const
 {
-  int tr_index = from_rf->index();
-  arc1 = from_arc1_[tr_index];
-  arc2 = from_arc2_[tr_index];
+  int rf_index = from_rf->index();
+  arc1 = from_arc1_[rf_index];
+  arc2 = from_arc2_[rf_index];
 }
 
 TimingArc *
@@ -316,13 +327,13 @@ TimingArcSet::sense() const
   return attrs_->timingSense();
 }
 
-RiseFall *
+const RiseFall *
 TimingArcSet::isRisingFallingEdge() const
 {
   int arc_count = arcs_.size();
   if (arc_count == 2) {
-    RiseFall *from_rf1 = arcs_[0]->fromEdge()->asRiseFall();
-    RiseFall *from_rf2 = arcs_[1]->fromEdge()->asRiseFall();
+    const RiseFall *from_rf1 = arcs_[0]->fromEdge()->asRiseFall();
+    const RiseFall *from_rf2 = arcs_[1]->fromEdge()->asRiseFall();
     if (from_rf1 == from_rf2)
       return from_rf1;
   }
@@ -412,8 +423,8 @@ timingArcSetLess(const TimingArcSet *set1,
     LibertyPort *to1 = set1->to();
     LibertyPort *to2 = set2->to();
     if (LibertyPort::equiv(to1, to2)) {
-      TimingRole *role1 = set1->role();
-      TimingRole *role2 = set2->role();
+      const TimingRole *role1 = set1->role();
+      const TimingRole *role2 = set2->role();
       if (role1 == role2) {
 	const FuncExpr *cond1 = set1->cond();
 	const FuncExpr *cond2 = set2->cond();
@@ -526,8 +537,8 @@ TimingArcSet::destroy()
 ////////////////////////////////////////////////////////////////
 
 TimingArc::TimingArc(TimingArcSet *set,
-		     Transition *from_rf,
-		     Transition *to_rf,
+		     const Transition *from_rf,
+		     const Transition *to_rf,
 		     TimingModel *model) :
   set_(set),
   from_rf_(from_rf),
@@ -545,18 +556,55 @@ TimingArc::~TimingArc()
   delete scaled_models_;
 }
 
-TimingModel *
-TimingArc::model(const OperatingConditions *op_cond) const
+string
+TimingArc::to_string() const
 {
-  if (scaled_models_) {
-    TimingModel *model = scaled_models_->findKey(op_cond);
-    if (model)
-      return model;
-    else
-      return model_;
+  string str = set_->from()->name();
+  str += " ";
+  str += from_rf_->to_string();
+  str += " -> ";
+  str += set_->to()->name();
+  str += " ";
+  str += to_rf_->to_string();
+  return str;
+}
+
+GateTimingModel *
+TimingArc::gateModel(const DcalcAnalysisPt *dcalc_ap) const
+{
+  return dynamic_cast<GateTimingModel*>(model(dcalc_ap));
+}
+
+GateTableModel *
+TimingArc::gateTableModel() const
+{
+  return dynamic_cast<GateTableModel*>(model_);
+}
+
+GateTableModel *
+TimingArc::gateTableModel(const DcalcAnalysisPt *dcalc_ap) const
+{
+  return dynamic_cast<GateTableModel*>(model(dcalc_ap));
+}
+
+CheckTimingModel *
+TimingArc::checkModel(const DcalcAnalysisPt *dcalc_ap) const
+{
+  return dynamic_cast<CheckTimingModel*>(model(dcalc_ap));
+}
+
+TimingModel *
+TimingArc::model(const DcalcAnalysisPt *dcalc_ap) const
+{
+  const TimingArc *corner_arc = cornerArc(dcalc_ap->libertyIndex());
+  ScaledTimingModelMap *scaled_models = corner_arc->scaled_models_;
+  if (scaled_models) {
+    const OperatingConditions *op_cond = dcalc_ap->operatingConditions();
+    TimingModel *scaled_model = scaled_models->findKey(op_cond);
+    if (scaled_model)
+      return scaled_model;
   }
-  else
-    return model_;
+  return corner_arc->model();
 }
 
 void
@@ -630,7 +678,7 @@ static EnumNameMap<TimingSense> timing_sense_name_map =
   };
 
 const char *
-timingSenseString(TimingSense sense)
+to_string(TimingSense sense)
 {
   return timing_sense_name_map.find(sense);
 }

@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -27,9 +35,11 @@ class LumpedCapDelayCalc : public ParallelDelayCalc
 public:
   LumpedCapDelayCalc(StaState *sta);
   ArcDelayCalc *copy() override;
+  const char *name() const override { return "lumped_cap"; }
   Parasitic *findParasitic(const Pin *drvr_pin,
                            const RiseFall *rf,
                            const DcalcAnalysisPt *dcalc_ap) override;
+  bool reduceSupported() const override { return true; }
   Parasitic *reduceParasitic(const Parasitic *parasitic_network,
                              const Pin *drvr_pin,
                              const RiseFall *rf,
@@ -47,14 +57,14 @@ public:
                            const Parasitic *parasitic,
                            const LoadPinIndexMap &load_pin_index_map,
                            const DcalcAnalysisPt *dcalc_ap) override;
-  string reportGateDelay(const Pin *drvr_pin,
-                         const TimingArc *arc,
-                         const Slew &in_slew,
-                         float load_cap,
-                         const Parasitic *parasitic,
-                         const LoadPinIndexMap &load_pin_index_map,
-                         const DcalcAnalysisPt *dcalc_ap,
-                         int digits) override;
+  std::string reportGateDelay(const Pin *drvr_pin,
+                              const TimingArc *arc,
+                              const Slew &in_slew,
+                              float load_cap,
+                              const Parasitic *parasitic,
+                              const LoadPinIndexMap &load_pin_index_map,
+                              const DcalcAnalysisPt *dcalc_ap,
+                              int digits) override;
 
 protected:
   ArcDcalcResult makeResult(const LibertyLibrary *drvr_library,

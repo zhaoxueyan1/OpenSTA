@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 
 #include "Network.hh"
@@ -25,6 +33,8 @@
 #include "ParseBus.hh"
 
 namespace sta {
+
+using std::string;
 
 Network::Network() :
   default_liberty_(nullptr),
@@ -258,7 +268,7 @@ Network::pathName(const Instance *instance) const
     const Instance *inst = path_iter1.next();
     name_length += strlen(name(inst)) + 1;
   }
-  char *path_name = makeTmpString(name_length);
+  char *path_name = makeTmpString(name_length + 1);
   char *path_ptr = path_name;
   // Top instance has null string name, so terminate the string here.
   *path_name = '\0';
@@ -1047,8 +1057,7 @@ Network::findInstPinsHierMatching(const Instance *instance,
   while (pin_iter->hasNext()) {
     const Pin *pin = pin_iter->next();
     const char *port_name = name(port(pin));
-    string pin_name;
-    stringPrint(pin_name, "%s%c%s", inst_name.c_str(), divider_, port_name);
+    string pin_name = inst_name + divider_ + port_name;
     if (pattern->match(pin_name.c_str()))
       matches.push_back(pin);
   }

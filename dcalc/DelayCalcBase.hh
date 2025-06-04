@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -22,6 +30,7 @@ namespace sta {
 
 class GateTableModel;
 
+// ArcDelayCalc helper functions.
 class DelayCalcBase : public ArcDelayCalc
 {
 public:
@@ -32,7 +41,10 @@ public:
                        const Net *net,
                        const Corner *corner,
                        const MinMaxAll *min_max) override;
-
+  void setDcalcArgParasiticSlew(ArcDcalcArg &gate,
+                                const DcalcAnalysisPt *dcalc_ap) override;
+  void setDcalcArgParasiticSlew(ArcDcalcArgSeq &gates,
+                                const DcalcAnalysisPt *dcalc_ap) override;
   ArcDelay checkDelay(const Pin *check_pin,
                       const TimingArc *arc,
                       const Slew &from_slew,
@@ -40,24 +52,16 @@ public:
                       float related_out_cap,
                       const DcalcAnalysisPt *dcalc_ap) override;
   
-  string reportCheckDelay(const Pin *check_pin,
-                          const TimingArc *arc,
-                          const Slew &from_slew,
-                          const char *from_slew_annotation,
-                          const Slew &to_slew,
-                          float related_out_cap,
-                          const DcalcAnalysisPt *dcalc_ap,
-                          int digits) override;
+  std::string reportCheckDelay(const Pin *check_pin,
+                               const TimingArc *arc,
+                               const Slew &from_slew,
+                               const char *from_slew_annotation,
+                               const Slew &to_slew,
+                               float related_out_cap,
+                               const DcalcAnalysisPt *dcalc_ap,
+                               int digits) override;
 
 protected:
-  GateTimingModel *gateModel(const TimingArc *arc,
-			     const DcalcAnalysisPt *dcalc_ap) const;
-  GateTableModel *gateTableModel(const TimingArc *arc,
-                                 const DcalcAnalysisPt *dcalc_ap) const;
-  CheckTimingModel *checkModel(const TimingArc *arc,
-			       const DcalcAnalysisPt *dcalc_ap) const;
-  TimingModel *model(const TimingArc *arc,
-		     const DcalcAnalysisPt *dcalc_ap) const;
   // Find the liberty library to use for logic/slew thresholds.
   LibertyLibrary *thresholdLibrary(const Pin *load_pin);
   // Adjust load_delay and load_slew from driver thresholds to load thresholds.

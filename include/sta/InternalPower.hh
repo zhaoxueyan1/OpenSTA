@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -32,9 +40,9 @@ public:
   void deleteContents();
   FuncExpr *when() const { return when_; }
   FuncExpr *&whenRef() { return when_; }
-  void setModel(RiseFall *rf,
+  void setModel(const RiseFall *rf,
 		InternalPowerModel *model);
-  InternalPowerModel *model(RiseFall *rf) const;
+  InternalPowerModel *model(const RiseFall *rf) const;
   const char *relatedPgPin() const { return related_pg_pin_; }
   void setRelatedPgPin(const char *related_pg_pin);
 
@@ -57,7 +65,7 @@ public:
   LibertyPort *relatedPort() const { return related_port_; }
   FuncExpr *when() const { return when_; }
   const char *relatedPgPin() const { return related_pg_pin_; }
-  float power(RiseFall *rf,
+  float power(const RiseFall *rf,
 	      const Pvt *pvt,
 	      float in_slew,
 	      float load_cap);
@@ -79,11 +87,11 @@ public:
 	      const Pvt *pvt,
 	      float in_slew,
 	      float load_cap) const;
-  string reportPower(const LibertyCell *cell,
-                     const Pvt *pvt,
-                     float in_slew,
-                     float load_cap,
-                     int digits) const;
+  std::string reportPower(const LibertyCell *cell,
+                          const Pvt *pvt,
+                          float in_slew,
+                          float load_cap,
+                          int digits) const;
 
 protected:
   void findAxisValues(float in_slew,

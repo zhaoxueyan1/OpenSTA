@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -42,7 +50,7 @@ public:
 };
 
 typedef Map<Clock*, GenclkInfo*> GenclkInfoMap;
-typedef Map<ClockPinPair, PathVertexRep*, ClockPinPairLess> GenclkSrcPathMap;
+typedef Map<ClockPinPair, std::vector<Path>, ClockPinPairLess> GenclkSrcPathMap;
 
 class Genclks : public StaState
 {
@@ -63,25 +71,20 @@ public:
 			 const EarlyLate *early_late,
 			 const PathAnalysisPt *path_ap) const;
   // Generated clock source path for a clock path root.
-  void srcPath(Path *clk_path,
-	       // Return value.
-	       PathVertex &src_path) const;
+  Path *srcPath(const Path *clk_path) const;
   // Generated clock source path.
-  void srcPath(const ClockEdge *clk_edge,
-	       const Pin *src_pin,
-	       const PathAnalysisPt *path_ap,
-	       // Return value.
-	       PathVertex &src_path) const;
-  void srcPath(const Clock *clk,
-	       const Pin *src_pin,
-	       const RiseFall *rf,
-	       const PathAnalysisPt *path_ap,
-	       // Return value.
-	       PathVertex &src_path) const;
-  Vertex *srcPathVertex(const Pin *pin) const;
+  Path *srcPath(const ClockEdge *clk_edge,
+                const Pin *src_pin,
+                const PathAnalysisPt *path_ap) const;
+  Path *srcPath(const Clock *clk,
+                const Pin *src_pin,
+                const RiseFall *rf,
+                const PathAnalysisPt *path_ap) const;
+  Vertex *srcPath(const Pin *pin) const;
   Level clkPinMaxLevel(const Clock *clk) const;
   void copyGenClkSrcPaths(Vertex *vertex,
 			  TagGroupBldr *tag_bldr);
+  void updateSrcPathPrevs();
 
 private:
   void findInsertionDelays();
@@ -92,8 +95,8 @@ private:
   void seedClkVertices(Clock *clk,
 		       BfsBkwdIterator &iter,
 		       VertexSet *fanins);
-  int srcPathIndex(const RiseFall *clk_rf,
-		   const PathAnalysisPt *path_ap) const;
+  size_t srcPathIndex(const RiseFall *clk_rf,
+                      const PathAnalysisPt *path_ap) const;
   bool matchesSrcFilter(Path *path,
 			const Clock *gclk) const;
   void seedSrcPins(Clock *gclk,
@@ -126,7 +129,6 @@ private:
 			  VertexSet &path_vertices,
 			  VertexSet &visited_vertices,
 			  EdgeSet *&fdbk_edges);
-
 
   bool found_insertion_delays_;
   GenclkSrcPathMap genclk_src_paths_;

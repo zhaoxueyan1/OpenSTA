@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -43,10 +51,10 @@ public:
   void driveResistance(const RiseFall *rf,
 		       const MinMax *min_max,
 		       float &res,
-		       bool &exists);
+		       bool &exists) const;
   bool hasDriveResistance(const RiseFall *rf,
-			  const MinMax *min_max);
-  bool driveResistanceMinMaxEqual(const RiseFall *rf);
+			  const MinMax *min_max) const;
+  bool driveResistanceMinMaxEqual(const RiseFall *rf) const;
   void setDriveCell(const LibertyLibrary *library,
 		    const LibertyCell *cell,
 		    const LibertyPort *from_port,
@@ -60,18 +68,18 @@ public:
 		 const LibertyCell *&cell,
 		 const LibertyPort *&from_port,
 		 float *&from_slews,
-		 const LibertyPort *&to_port);
+		 const LibertyPort *&to_port) const;
   InputDriveCell *driveCell(const RiseFall *rf,
-			    const MinMax *min_max);
+			    const MinMax *min_max) const;
   bool hasDriveCell(const RiseFall *rf,
-		    const MinMax *min_max);
+		    const MinMax *min_max) const;
   // True if rise/fall/min/max drive cells are equal.
-  bool driveCellsEqual();
+  bool driveCellsEqual() const;
   void slew(const RiseFall *rf,
 	    const MinMax *min_max,
 	    float &slew,
-	    bool &exists);
-  RiseFallMinMax *slews() { return &slews_; }
+	    bool &exists) const;
+  const RiseFallMinMax *slews() const { return &slews_; }
 
 private:
   RiseFallMinMax slews_;

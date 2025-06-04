@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "ReportTcl.hh"
 
@@ -31,13 +39,15 @@ using ::Tcl_GetChannelType;
 
 extern "C" {
 
+#if TCL_MAJOR_VERSION >= 9
+#define CONST84 const
+#endif
+
 static int
 encapOutputProc(ClientData instanceData,
                 CONST84 char *buf,
                 int toWrite,
                 int *errorCodePtr);
-static int
-encapCloseProc(ClientData instanceData, Tcl_Interp *interp);
 static int
 encapSetOptionProc(ClientData instanceData,
                    Tcl_Interp *interp,
@@ -53,11 +63,6 @@ encapInputProc(ClientData instanceData,
                char *buf,
                int bufSize,
                int *errorCodePtr);
-static int
-encapSeekProc(ClientData instanceData,
-              long offset,
-              int seekMode,
-              int *errorCodePtr);
 static void
 encapWatchProc(ClientData instanceData, int mask);
 static int
@@ -66,36 +71,55 @@ encapGetHandleProc(ClientData instanceData,
                    ClientData *handlePtr);
 static int
 encapBlockModeProc(ClientData instanceData, int mode);
+
+#if TCL_MAJOR_VERSION < 9
+static int
+encapCloseProc(ClientData instanceData, Tcl_Interp *interp);
+static int
+encapSeekProc(ClientData instanceData,
+              long offset,
+              int seekMode,
+              int *errorCodePtr);
+#endif
+
 }  // extern "C"
 
 Tcl_ChannelType tcl_encap_type_stdout = {
-    const_cast<char *>("file"),
-    TCL_CHANNEL_VERSION_4,
-    encapCloseProc,
-    encapInputProc,
-    encapOutputProc,
-    encapSeekProc,
-    encapSetOptionProc,
-    encapGetOptionProc,
-    encapWatchProc,
-    encapGetHandleProc,
-    nullptr,  // close2Proc
-    encapBlockModeProc,
-    nullptr,  // flushProc
-    nullptr,  // handlerProc
-    nullptr,  // wideSeekProc
-    nullptr,  // threadActionProc
-    nullptr   // truncateProc
+  const_cast<char*>("file"),
+  TCL_CHANNEL_VERSION_5,
+#if TCL_MAJOR_VERSION < 9
+  encapCloseProc,
+#else
+  nullptr,  // closeProc unused
+#endif
+  encapInputProc,
+  encapOutputProc,
+#if TCL_MAJOR_VERSION < 9
+  encapSeekProc,
+#else
+  nullptr,  // close2Proc
+#endif
+  encapSetOptionProc,
+  encapGetOptionProc,
+  encapWatchProc,
+  encapGetHandleProc,
+  nullptr,  // close2Proc
+  encapBlockModeProc,
+  nullptr,  // flushProc
+  nullptr,  // handlerProc
+  nullptr,  // wideSeekProc
+  nullptr,  // threadActionProc
+  nullptr   // truncateProc
 };
 
 ////////////////////////////////////////////////////////////////
 
 ReportTcl::ReportTcl() :
-    Report(), interp_(nullptr),
-    tcl_stdout_(nullptr),
-    tcl_stderr_(nullptr),
-    tcl_encap_stdout_(nullptr),
-    tcl_encap_stderr_(nullptr)
+  Report(), interp_(nullptr),
+  tcl_stdout_(nullptr),
+  tcl_stderr_(nullptr),
+  tcl_encap_stdout_(nullptr),
+  tcl_encap_stderr_(nullptr)
 {
 }
 
@@ -229,17 +253,6 @@ encapInputProc(ClientData,
 }
 
 static int
-encapCloseProc(ClientData instanceData,
-               Tcl_Interp *)
-{
-  ReportTcl *report = reinterpret_cast<ReportTcl *>(instanceData);
-  report->logEnd();
-  report->redirectFileEnd();
-  report->redirectStringEnd();
-  return 0;
-}
-
-static int
 encapSetOptionProc(ClientData,
                    Tcl_Interp *,
                    CONST84 char *,
@@ -255,15 +268,6 @@ encapGetOptionProc(ClientData,
                    Tcl_DString *)
 {
   return 0;
-}
-
-static int
-encapSeekProc(ClientData,
-              long,
-              int,
-              int *)
-{
-  return -1;
 }
 
 static void
@@ -285,5 +289,29 @@ encapBlockModeProc(ClientData,
 {
   return 0;
 }
+
+#if TCL_MAJOR_VERSION < 9
+
+static int
+encapCloseProc(ClientData instanceData,
+               Tcl_Interp *)
+{
+  ReportTcl *report = reinterpret_cast<ReportTcl *>(instanceData);
+  report->logEnd();
+  report->redirectFileEnd();
+  report->redirectStringEnd();
+  return 0;
+}
+
+static int
+encapSeekProc(ClientData,
+              long,
+              int,
+              int *)
+{
+  return -1;
+}
+
+#endif
 
 }  // namespace sta

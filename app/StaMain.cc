@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "StaMain.hh"
 
@@ -51,10 +59,11 @@ findCmdLineFlag(int &argc,
   for (int i = 1; i < argc; i++) {
     char *arg = argv[i];
     if (stringEq(arg, flag)) {
-      // remove flag from argv.
+      // Remove flag from argv.
       for (int j = i + 1; j < argc; j++, i++)
 	argv[i] = argv[j];
       argc--;
+      argv[argc] = nullptr;
       return true;
     }
   }
@@ -70,10 +79,11 @@ findCmdLineKey(int &argc,
     char *arg = argv[i];
     if (stringEq(arg, key) && i + 1 < argc) {
       char *value = argv[i + 1];
-      // remove key and value from argv.
+      // Remove key and value from argv.
       for (int j = i + 2; j < argc; j++, i++)
 	argv[i] = argv[j];
       argc -= 2;
+      argv[argc] = nullptr;
       return value;
     }
   }
@@ -87,11 +97,11 @@ sourceTclFile(const char *filename,
 	      bool verbose,
 	      Tcl_Interp *interp)
 {
-  string cmd;
-  stringPrint(cmd, "source %s%s%s",
-	      echo ? "-echo " : "",
-	      verbose ? "-verbose " : "",
-	      filename);
+  std::string cmd;
+  stringPrint(cmd, "sta::include_file %s %s %s",
+	      filename,
+	      echo ? "1" : "0",
+	      verbose ? "1" : "0");
   int code = Tcl_Eval(interp, cmd.c_str());
   const char *result = Tcl_GetStringResult(interp);
   if (result[0] != '\0')

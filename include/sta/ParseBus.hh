@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,14 +13,20 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
 #include <string>
 
 namespace sta {
-
-using std::string;
 
 // Return true if name is a bus.
 bool
@@ -43,7 +49,7 @@ parseBusName(const char *name,
 	     char escape,
 	     // Return values.
 	     bool &is_bus,
-             string &bus_name,
+             std::string &bus_name,
 	     int &index);
 // Allow multiple different left/right bus brackets.
 void
@@ -53,7 +59,7 @@ parseBusName(const char *name,
 	     char escape,
 	     // Return values.
 	     bool &is_bus,
-	     string &bus_name,
+	     std::string &bus_name,
 	     int &index);
 
 // Parse a bus range, such as BUS[4:0].
@@ -67,7 +73,7 @@ parseBusName(const char *name,
              // Return values.
              bool &is_bus,
              bool &is_range,
-             string &bus_name,
+             std::string &bus_name,
              int &from,
              int &to,
              bool &subscript_wild);
@@ -82,13 +88,13 @@ parseBusName(const char *name,
              // Return values.
              bool &is_bus,
              bool &is_range,
-             string &bus_name,
+             std::string &bus_name,
              int &from,
              int &to,
              bool &subscript_wild);
 
 // Insert escapes before ch1 and ch2 in token.
-string
+std::string
 escapeChars(const char *token,
 	    const char ch1,
 	    const char ch2,

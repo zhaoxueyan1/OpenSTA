@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,8 +13,18 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
+
+#include <string>
 
 #include "Iterator.hh"
 #include "MinMax.hh"
@@ -34,6 +44,7 @@ public:
 		 PathAPIndex index,
 		 const MinMax *path_min_max,
 		 DcalcAnalysisPt *dcalc_ap);
+  std::string to_string() const;
   Corner *corner() const { return corner_; }
   PathAPIndex index() const { return index_; }
   const MinMax *pathMinMax() const { return path_min_max_; }

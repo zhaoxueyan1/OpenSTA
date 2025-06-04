@@ -15,13 +15,6 @@ cmake-build-debug
 build
 pvt
 
-include/sta/StaConfig.hh
-
-app/sta
-app/libOpenSTA.*
-app/sta.exe
-app/sta.dSYM
-
 # iverilog turd
 examples/gcd_tb
 
@@ -30,3 +23,8 @@ doc/._Sta.docx
 test/results
 # ngspice turd
 test/b3v3_1check.log
+
+doc/messages.txt
+
+# clangd turds
+.cache/

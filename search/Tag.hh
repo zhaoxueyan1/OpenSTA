@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -21,7 +29,7 @@
 #include "Transition.hh"
 #include "SdcClass.hh"
 #include "SearchClass.hh"
-#include "PathRef.hh"
+#include "Path.hh"
 
 namespace sta {
 
@@ -54,10 +62,10 @@ public:
       bool own_states,
       const StaState *sta);
   ~Tag();
-  const char *asString(const StaState *sta) const;
-  const char *asString(bool report_index,
-		       bool report_rf_min_max,
-		       const StaState *sta) const;
+  std::string to_string(const StaState *sta) const;
+  std::string to_string(bool report_index,
+                        bool report_rf_min_max,
+                        const StaState *sta) const;
   ClkInfo *clkInfo() const { return clk_info_; }
   bool isClock() const { return is_clk_; }
   const ClockEdge *clkEdge() const;
@@ -78,7 +86,8 @@ public:
   bool isFilter() const { return is_filter_; }
   bool isSegmentStart() const { return is_segment_start_; }
   size_t hash() const { return hash_; }
-  size_t matchHash(bool match_crpr_clk_pin) const;
+  size_t matchHash(bool match_crpr_clk_pin,
+                   const StaState *sta) const;
 
 protected:
   void findHash();
@@ -103,8 +112,12 @@ private:
 class TagLess
 {
 public:
+  TagLess(const StaState *sta);
   bool operator()(const Tag *tag1,
 		  const Tag *tag2) const;
+
+private:
+  const StaState *sta_;
 };
 
 class TagIndexLess
@@ -130,7 +143,7 @@ public:
 int
 tagCmp(const Tag *tag1,
        const Tag *tag2,
-       bool cmp_rf);
+       const StaState *sta);
 
 // Match tag clock edge, clock driver and exception states but not clk info.
 bool

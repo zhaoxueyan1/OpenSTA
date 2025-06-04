@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -28,19 +36,21 @@
 #include "VertexVisitor.hh"
 #include "SearchClass.hh"
 #include "PowerClass.hh"
+#include "ArcDelayCalc.hh"
+#include "CircuitSim.hh"
+#include "Variables.hh"
+#include "Property.hh"
 
 struct Tcl_Interp;
 
 namespace sta {
-
-using std::string;
-using ::Tcl_Interp;
 
 // Don't include headers to minimize dependencies.
 class MinMax;
 class MinMaxAll;
 class RiseFallBoth;
 class RiseFall;
+class VerilogReader;
 class ReportPath;
 class CheckTiming;
 class DcalcAnalysisPt;
@@ -110,13 +120,13 @@ public:
 				      bool infer_latches);
   bool setMinLibrary(const char *min_filename,
 		     const char *max_filename);
+  bool readVerilog(const char *filename);
   // Network readers call this to notify the Sta to delete any previously
   // linked network.
   void readNetlistBefore();
   // Return true if successful.
-  bool linkDesign(const char *top_cell_name);
-  bool linkMakeBlackBoxes() const;
-  void setLinkMakeBlackBoxes(bool make);
+  bool linkDesign(const char *top_cell_name,
+                  bool make_black_boxes);
 
   // SDC Swig API.
   Instance *currentInstance() const;
@@ -425,8 +435,6 @@ public:
   void removeDisable(TimingArcSet *arc_set);
   // Edge is disabled by constant.
   bool isDisabledConstant(Edge *edge);
-  // Edge is default cond disabled by timing_disable_cond_default_arcs var.
-  bool isDisabledCondDefault(Edge *edge);
   // Return a set of constant pins that disabled edge.
   // Caller owns the returned set.
   PinSet disabledConstantPins(Edge *edge);
@@ -501,6 +509,7 @@ public:
 		     ExceptionTo *to,
 		     const MinMax *min_max,
 		     bool ignore_clk_latency,
+                     bool break_path,
 		     float delay,
 		     const char *comment);
   void makeGroupPath(const char *name,
@@ -535,7 +544,7 @@ public:
 			       ClockSet *to_clks,
 			       InstanceSet *to_insts,
 			       const RiseFallBoth *rf,
- 			       RiseFallBoth *end_rf);
+			       const RiseFallBoth *end_rf);
   void checkExceptionToPins(ExceptionTo *to,
 			    const char *file, int) const;
   void deleteExceptionTo(ExceptionTo *to);
@@ -773,7 +782,7 @@ public:
 			const RiseFallBoth *rf,
 			float slew);
   void writeSdf(const char *filename,
-		Corner *corner,
+		const Corner *corner,
 		char divider,
                 bool include_typ,
 		int digits,
@@ -782,61 +791,7 @@ public:
 		bool no_version);
   // Remove all delay and slew annotations.
   void removeDelaySlewAnnotations();
-  // TCL variable sta_crpr_enabled.
-  // Common Reconvergent Clock Removal (CRPR).
-  // Timing check source/target common clock path overlap for search
-  // with analysis mode on_chip_variation.
-  bool crprEnabled() const;
-  void setCrprEnabled(bool enabled);
-  // TCL variable sta_crpr_mode.
-  CrprMode crprMode() const;
-  void setCrprMode(CrprMode mode);
-  // TCL variable sta_pocv_enabled.
-  // Parametric on chip variation (statisical sta).
-  bool pocvEnabled() const;
-  void setPocvEnabled(bool enabled);
-  // Number of std deviations from mean to use for normal distributions.
-  void setSigmaFactor(float factor);
-  // TCL variable sta_propagate_gated_clock_enable.
-  // Propagate gated clock enable arrivals.
-  bool propagateGatedClockEnable() const;
-  void setPropagateGatedClockEnable(bool enable);
-  // TCL variable sta_preset_clear_arcs_enabled.
-  // Enable search through preset/clear arcs.
-  bool presetClrArcsEnabled() const;
-  void setPresetClrArcsEnabled(bool enable);
-  // TCL variable sta_cond_default_arcs_enabled.
-  // Enable/disable default arcs when conditional arcs exist.
-  bool condDefaultArcsEnabled() const;
-  void setCondDefaultArcsEnabled(bool enabled);
-  // TCL variable sta_internal_bidirect_instance_paths_enabled.
-  // Enable/disable timing from bidirect pins back into the instance.
-  bool bidirectInstPathsEnabled() const;
-  void setBidirectInstPathsEnabled(bool enabled);
-  // TCL variable sta_bidirect_net_paths_enabled.
-  // Enable/disable timing from bidirect driver pins to their own loads.
-  bool bidirectNetPathsEnabled() const;
-  void setBidirectNetPathsEnabled(bool enabled);
-  // TCL variable sta_recovery_removal_checks_enabled.
-  bool recoveryRemovalChecksEnabled() const;
-  void setRecoveryRemovalChecksEnabled(bool enabled);
-  // TCL variable sta_gated_clock_checks_enabled.
-  bool gatedClkChecksEnabled() const;
-  void setGatedClkChecksEnabled(bool enabled);
-  // TCL variable sta_dynamic_loop_breaking.
-  bool dynamicLoopBreaking() const;
-  void setDynamicLoopBreaking(bool enable);
-  // TCL variable sta_propagate_all_clocks.
-  // Clocks defined after sta_propagate_all_clocks is true
-  // are propagated (existing clocks are not effected).
-  bool propagateAllClocks() const;
-  void setPropagateAllClocks(bool prop);
-  // TCL var sta_clock_through_tristate_enabled.
-  bool clkThruTristateEnabled() const;
-  void setClkThruTristateEnabled(bool enable);
-  // TCL variable sta_input_port_default_clock.
-  bool useDefaultArrivalClock() const;
-  void setUseDefaultArrivalClock(bool enable);
+
   virtual CheckErrorSeq &checkTiming(bool no_input_delay,
 				     bool no_output_delay,
 				     bool reg_multiple_clks,
@@ -861,11 +816,11 @@ public:
                                   const MinMaxAll *min_max,
                                   // Number of path ends to report in
                                   // each group.
-                                  int group_count,
+                                  int group_path_count,
                                   // Number of paths to report for
                                   // each endpoint.
-                                  int endpoint_count,
-                                  // endpoint_count paths report unique pins
+                                  int endpoint_path_count,
+                                  // endpoint_path_count paths report unique pins
                                   // without rise/fall variations.
                                   bool unique_pins,
                                   // Min/max bounds for slack of
@@ -888,10 +843,12 @@ public:
   void setReportPathFormat(ReportPathFormat format);
   void setReportPathFieldOrder(StringSeq *field_names);
   void setReportPathFields(bool report_input_pin,
+                           bool report_hier_pins,
 			   bool report_net,
 			   bool report_cap,
 			   bool report_slew,
-                           bool report_fanout);
+			   bool report_fanout,
+			   bool report_src_attr);
   ReportField *findReportPathField(const char *name);
   void setReportPathDigits(int digits);
   void setReportPathNoSplit(bool no_split);
@@ -904,11 +861,12 @@ public:
   //   Previous path end is used to detect path group changes
   //   so headers are reported by group.
   void reportPathEnd(PathEnd *end,
-		     PathEnd *prev_end);
+		     PathEnd *prev_end,
+                     bool last);
   void reportPathEnd(PathEnd *end);
   void reportPathEnds(PathEndSeq *ends);
   ReportPath *reportPath() { return report_path_; }
-  void reportPath(Path *path);
+  void reportPath(const Path *path);
 
   // Report clk skews for clks.
   void reportClkSkew(ConstClockSeq &clks,
@@ -938,7 +896,7 @@ public:
   // bug that should be reported.
   void updateTiming(bool full);
   // Invalidate all delay calculations. Arrivals also invalidated.
-  void delaysInvalid();
+  void delaysInvalid() const;
   // Invalidate all arrival and required times.
   void arrivalsInvalid();
   PinSet startpointPins();
@@ -950,11 +908,11 @@ public:
   PinSet findGroupPathPins(const char *group_path_name);
   // Find all required times after updateTiming().
   void findRequireds();
-  string reportDelayCalc(Edge *edge,
-                         TimingArc *arc,
-                         const Corner *corner,
-                         const MinMax *min_max,
-                         int digits);
+  std::string reportDelayCalc(Edge *edge,
+                              TimingArc *arc,
+                              const Corner *corner,
+                              const MinMax *min_max,
+                              int digits);
   void writeSdc(const char *filename,
 		// Map hierarchical pins and instances to leaf pins and instances.
 		bool leaf,
@@ -986,21 +944,21 @@ public:
   VertexPathIterator *vertexPathIterator(Vertex *vertex,
 					 const RiseFall *rf,
 					 const MinMax *min_max);
-  PathRef vertexWorstArrivalPath(Vertex *vertex,
-                                 const RiseFall *rf,
-                                 const MinMax *min_max);
-  PathRef vertexWorstArrivalPath(Vertex *vertex,
-                                 const MinMax *min_max);
-  PathRef vertexWorstRequiredPath(Vertex *vertex,
-                                  const RiseFall *rf,
-                                  const MinMax *min_max);
-  PathRef vertexWorstRequiredPath(Vertex *vertex,
-                                  const MinMax *min_max);
-  PathRef vertexWorstSlackPath(Vertex *vertex,
-                               const MinMax *min_max);
-  PathRef vertexWorstSlackPath(Vertex *vertex,
+  Path *vertexWorstArrivalPath(Vertex *vertex,
                                const RiseFall *rf,
                                const MinMax *min_max);
+  Path *vertexWorstArrivalPath(Vertex *vertex,
+                               const MinMax *min_max);
+  Path *vertexWorstRequiredPath(Vertex *vertex,
+                                const RiseFall *rf,
+                                const MinMax *min_max);
+  Path *vertexWorstRequiredPath(Vertex *vertex,
+                                const MinMax *min_max);
+  Path *vertexWorstSlackPath(Vertex *vertex,
+                             const MinMax *min_max);
+  Path *vertexWorstSlackPath(Vertex *vertex,
+                             const RiseFall *rf,
+                             const MinMax *min_max);
 
   // Find the min clock period for rise/rise and fall/fall paths of a clock
   // using the slack. This does NOT correctly predict min period when there
@@ -1092,16 +1050,15 @@ public:
 			    bool annotated);
   // Make sure levels are up to date and return vertex level.
   Level vertexLevel(Vertex *vertex);
-  GraphLoopSeq *graphLoops();
+  GraphLoopSeq &graphLoops();
   PathAnalysisPt *pathAnalysisPt(Path *path);
   DcalcAnalysisPt *pathDcalcAnalysisPt(Path *path);
   TagIndex tagCount() const;
   TagGroupIndex tagGroupCount() const;
   int clkInfoCount() const;
-  int arrivalCount() const;
-  int requiredCount() const;
-  int vertexArrivalCount(Vertex  *vertex) const;
-  Vertex *maxArrivalCountVertex() const;
+  int pathCount() const;
+  int vertexPathCount(Vertex  *vertex) const;
+  Vertex *maxPathCountVertex() const;
 
   LogicValue simLogicValue(const Pin *pin);
   // Propagate liberty constant functions and pins tied high/low through
@@ -1165,7 +1122,9 @@ public:
                                   bool includes_pin_caps,
                                   const ParasiticAnalysisPt *ap);
 
+  ////////////////////////////////////////////////////////////////
   // TCL network edit function support.
+
   virtual Instance *makeInstance(const char *name,
 				 LibertyCell *cell,
 				 Instance *parent);
@@ -1188,7 +1147,7 @@ public:
   // disconnect_net
   virtual void disconnectPin(Pin *pin);
   virtual void makePortPin(const char *port_name,
-                           const char *direction);
+                           PortDirection *dir);
   // Notify STA of network change.
   void networkChanged();
   void networkChanged1();
@@ -1229,6 +1188,10 @@ public:
 
   void setTclInterp(Tcl_Interp *interp);
   Tcl_Interp *tclInterp();
+  // Ensure a network has been read, and linked.
+  Network *ensureLinked();
+  // Ensure a network has been read, linked and liberty libraries exist.
+  Network *ensureLibLinked();
   void ensureLevelized();
   // Ensure that the timing graph has been built.
   Graph *ensureGraph();
@@ -1237,7 +1200,7 @@ public:
   void setCmdCorner(Corner *corner);
   Corner *findCorner(const char *corner_name);
   bool multiCorner();
-  void makeCorners(StringSet *corner_names);
+  virtual void makeCorners(StringSet *corner_names);
   // Find all arc delays and vertex slews with delay calculator.
   virtual void findDelays();
   // Find arc delays and vertex slews thru to level of to_vertex.
@@ -1284,7 +1247,7 @@ public:
 	     PowerResult &pad);
   PowerResult power(const Instance *inst,
                     const Corner *corner);
-  PwrActivity findClkedActivity(const Pin *pin);
+  PwrActivity activity(const Pin *pin);
 
   void writeTimingModel(const char *lib_name,
                         const char *cell_name,
@@ -1297,10 +1260,82 @@ public:
 		      LibertyLibrarySeq *map_libs);
   LibertyCellSeq *equivCells(LibertyCell *cell);
 
+  void writePathSpice(Path *path,
+                      const char *spice_filename,
+                      const char *subckt_filename,
+                      const char *lib_subckt_filename,
+                      const char *model_filename,
+                      const char *power_name,
+                      const char *gnd_name,
+                      CircuitSim ckt_sim);
+
+  ////////////////////////////////////////////////////////////////
+  // TCL Variables
+
+  // TCL variable sta_crpr_enabled.
+  // Common Reconvergent Clock Removal (CRPR).
+  // Timing check source/target common clock path overlap for search
+  // with analysis mode on_chip_variation.
+  bool crprEnabled() const;
+  void setCrprEnabled(bool enabled);
+  // TCL variable sta_crpr_mode.
+  CrprMode crprMode() const;
+  void setCrprMode(CrprMode mode);
+  // TCL variable sta_pocv_enabled.
+  // Parametric on chip variation (statisical sta).
+  bool pocvEnabled() const;
+  void setPocvEnabled(bool enabled);
+  // Number of std deviations from mean to use for normal distributions.
+  void setSigmaFactor(float factor);
+  // TCL variable sta_propagate_gated_clock_enable.
+  // Propagate gated clock enable arrivals.
+  bool propagateGatedClockEnable() const;
+  void setPropagateGatedClockEnable(bool enable);
+  // TCL variable sta_preset_clear_arcs_enabled.
+  // Enable search through preset/clear arcs.
+  bool presetClrArcsEnabled() const;
+  void setPresetClrArcsEnabled(bool enable);
+  // TCL variable sta_cond_default_arcs_enabled.
+  // Enable/disable default arcs when conditional arcs exist.
+  bool condDefaultArcsEnabled() const;
+  void setCondDefaultArcsEnabled(bool enabled);
+  // TCL variable sta_internal_bidirect_instance_paths_enabled.
+  // Enable/disable timing from bidirect pins back into the instance.
+  bool bidirectInstPathsEnabled() const;
+  void setBidirectInstPathsEnabled(bool enabled);
+  // TCL variable sta_bidirect_net_paths_enabled.
+  // Enable/disable timing from bidirect driver pins to their own loads.
+  bool bidirectNetPathsEnabled() const;
+  void setBidirectNetPathsEnabled(bool enabled);
+  // TCL variable sta_recovery_removal_checks_enabled.
+  bool recoveryRemovalChecksEnabled() const;
+  void setRecoveryRemovalChecksEnabled(bool enabled);
+  // TCL variable sta_gated_clock_checks_enabled.
+  bool gatedClkChecksEnabled() const;
+  void setGatedClkChecksEnabled(bool enabled);
+  // TCL variable sta_dynamic_loop_breaking.
+  bool dynamicLoopBreaking() const;
+  void setDynamicLoopBreaking(bool enable);
+  // TCL variable sta_propagate_all_clocks.
+  // Clocks defined after sta_propagate_all_clocks is true
+  // are propagated (existing clocks are not effected).
+  bool propagateAllClocks() const;
+  void setPropagateAllClocks(bool prop);
+  // TCL var sta_clock_through_tristate_enabled.
+  bool clkThruTristateEnabled() const;
+  void setClkThruTristateEnabled(bool enable);
+  // TCL variable sta_input_port_default_clock.
+  bool useDefaultArrivalClock() const;
+  void setUseDefaultArrivalClock(bool enable);
+  ////////////////////////////////////////////////////////////////
+
+  Properties &properties() { return properties_; }
+
 protected:
   // Default constructors that are called by makeComponents in the Sta
   // constructor.  These can be redefined by a derived class to
   // specialize the sta components.
+  virtual void makeVariables();
   virtual void makeReport();
   virtual void makeDebug();
   virtual void makeUnits();
@@ -1422,6 +1457,7 @@ protected:
   CmdNamespace cmd_namespace_;
   Instance *current_instance_;
   Corner *cmd_corner_;
+  VerilogReader *verilog_reader_;
   CheckTiming *check_timing_;
   CheckSlewLimits *check_slew_limits_;
   CheckFanoutLimits *check_fanout_limits_;
@@ -1433,12 +1469,12 @@ protected:
   ReportPath *report_path_;
   Power *power_;
   Tcl_Interp *tcl_interp_;
-  bool link_make_black_boxes_;
   bool update_genclks_;
   EquivCells *equiv_cells_;
   bool graph_sdc_annotated_;
   bool parasitics_per_corner_;
   bool parasitics_per_min_max_;
+  Properties properties_;
 
   // Singleton sta used by tcl command interpreter.
   static Sta *sta_;

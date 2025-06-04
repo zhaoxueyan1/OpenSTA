@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "WorstSlack.hh"
 
@@ -246,7 +254,7 @@ WorstSlack::checkQueue(PathAPIndex path_ap_index)
 	&& delayLessEqual(search_->wnsSlack(end, path_ap_index),
 			  slack_threshold_, this))
       report_->reportLine("WorstSlack queue missing %s %s < %s",
-                          end->name(network_),
+                          end->to_string(this).c_str(),
                           delayAsString(search_->wnsSlack(end, path_ap_index), this),
                           delayAsString(slack_threshold_, this));
   }
@@ -254,7 +262,7 @@ WorstSlack::checkQueue(PathAPIndex path_ap_index)
   for (Vertex *end : *queue_) {
     if (!end_set.hasKey(end))
       report_->reportLine("WorstSlack queue extra %s %s > %s",
-                          end->name(network_),
+                          end->to_string(this).c_str(),
                           delayAsString(search_->wnsSlack(end, path_ap_index), this),
                           delayAsString(slack_threshold_, this));
   }
@@ -265,32 +273,34 @@ WorstSlack::updateWorstSlack(Vertex *vertex,
 			     SlackSeq &slacks,
 			     PathAPIndex path_ap_index)
 {
-  Slack slack = slacks[path_ap_index];
+  // Do not touch the state unless queue has been initialized
+  if (!queue_->empty()) {
+    Slack slack = slacks[path_ap_index];
+    // Locking is required because ArrivalVisitor is called by multiple
+    // threads.
+    LockGuard lock(lock_);
+    if (worst_vertex_
+        && delayLess(slack, worst_slack_, this))
+      setWorstSlack(vertex, slack);
+    else if (vertex == worst_vertex_)
+      // Mark worst slack as unknown (updated by findWorstSlack().
+      worst_vertex_ = nullptr;
 
-  // Locking is required because ArrivalVisitor is called by multiple
-  // threads.
-  LockGuard lock(lock_);
-  if (worst_vertex_
-      && delayLess(slack, worst_slack_, this))
-    setWorstSlack(vertex, slack);
-  else if (vertex == worst_vertex_)
-    // Mark worst slack as unknown (updated by findWorstSlack().
-    worst_vertex_ = nullptr;
-
-  if (!delayEqual(slack, slack_init_)
-      && delayLessEqual(slack, slack_threshold_, this)) {
-    debugPrint(debug_, "wns", 3, "insert %s %s",
-               vertex->name(network_),
-               delayAsString(slack, this));
-    queue_->insert(vertex);
+    if (!delayEqual(slack, slack_init_)
+        && delayLessEqual(slack, slack_threshold_, this)) {
+      debugPrint(debug_, "wns", 3, "insert %s %s",
+                 vertex->to_string(this).c_str(),
+                 delayAsString(slack, this));
+      queue_->insert(vertex);
+    }
+    else {
+      debugPrint(debug_, "wns", 3, "delete %s %s",
+                 vertex->to_string(this).c_str(),
+                 delayAsString(slack, this));
+      queue_->erase(vertex);
+    }
+    //checkQueue(path_ap_index);
   }
-  else {
-    debugPrint(debug_, "wns", 3, "delete %s %s",
-               vertex->name(network_),
-               delayAsString(slack, this));
-    queue_->erase(vertex);
-  }
-  //  checkQueue();
 }
 
 void
@@ -298,7 +308,7 @@ WorstSlack::setWorstSlack(Vertex *vertex,
 			  Slack slack)
 {
   debugPrint(debug_, "wns", 3, "%s %s",
-             vertex->name(network_),
+             vertex->to_string(this).c_str(),
              delayAsString(slack, this));
   worst_vertex_ = vertex;
   worst_slack_ = slack;

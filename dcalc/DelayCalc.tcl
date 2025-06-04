@@ -1,5 +1,5 @@
 # OpenSTA, Static Timing Analyzer
-# Copyright (c) 2024, Parallax Software, Inc.
+# Copyright (c) 2025, Parallax Software, Inc.
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
+# 
+# The origin of this software must not be misrepresented; you must not
+# claim that you wrote the original software.
+# 
+# Altered source versions must be plainly marked as such, and must not be
+# misrepresented as being the original software.
+# 
+# This notice may not be removed or altered from any source distribution.
 
 namespace eval sta {
 
@@ -123,7 +131,7 @@ proc set_delay_calculator { alg } {
   if { [is_delay_calc_name $alg] } {
     set_delay_calculator_cmd $alg
   } else {
-    sta_error 180 "delay calculator $alg not found."
+    sta_error 195 "delay calculator $alg not found."
   }
 }
 
@@ -148,17 +156,17 @@ proc set_assigned_delay { args } {
   if [info exists keys(-from)] {
     set from_pins [get_port_pins_error "from_pins" $keys(-from)]
   } else {
-    sta_error 181 ""set_assigned_delay" missing -from argument."
+    sta_error 196 "set_assigned_delay missing -from argument."
   }
   if [info exists keys(-to)] {
     set to_pins [get_port_pins_error "to_pins" $keys(-to)]
   } else {
-    sta_error 182 ""set_assigned_delay" missing -to argument."
+    sta_error 182 "set_assigned_delay missing -to argument."
   }
 
   set delay [lindex $args 0]
   if {![string is double $delay]} {
-    sta_error 183 ""set_assigned_delay" delay is not a float."
+    sta_error 183 "set_assigned_delay delay is not a float."
   }
   set delay [time_ui_sta $delay]
 
@@ -283,7 +291,7 @@ proc set_assigned_check { args } {
   }
   set check_value [lindex $args 0]
   if { ![string is double $check_value] } {
-    sta_error 192 ""set_assigned_check" check_value is not a float."
+    sta_error 192 "set_assigned_check check_value is not a float."
   }
   set check_value [time_ui_sta $check_value]
 

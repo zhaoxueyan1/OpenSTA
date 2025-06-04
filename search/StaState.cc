@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "StaState.hh"
 
@@ -21,6 +29,10 @@
 #include "DispatchQueue.hh"
 #include "Units.hh"
 #include "Network.hh"
+#include "Variables.hh"
+#include "Sdc.hh"
+#include "Graph.hh"
+#include "TimingArc.hh"
 
 namespace sta {
 
@@ -40,9 +52,9 @@ StaState::StaState() :
   search_(nullptr),
   latches_(nullptr),
   clk_network_(nullptr),
+  variables_(nullptr),
   thread_count_(1),
   dispatch_queue_(nullptr),
-  pocv_enabled_(false),
   sigma_factor_(1.0)
 {
 }
@@ -98,6 +110,20 @@ void
 StaState::setDebug(Debug *debug)
 {
   debug_ = debug;
+}
+
+bool
+StaState::crprActive() const
+{
+  return sdc_->analysisType() == AnalysisType::ocv
+    && variables_->crprEnabled();
+}
+
+bool
+StaState::isDisabledCondDefault(Edge *edge) const
+{
+  return !variables_->condDefaultArcsEnabled()
+    && edge->timingArcSet()->isCondDefault();
 }
 
 } // namespace

@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "ClkInfo.hh"
 
@@ -26,15 +34,6 @@
 
 namespace sta {
 
-static bool
-clkInfoEqual(const ClkInfo *clk_info1,
-	     const ClkInfo *clk_info2,
-	     const StaState *sta);
-static int
-clkInfoCmp(const ClkInfo *clk_info1,
-	   const ClkInfo *clk_info2,
-	   const StaState *sta);
-
 ClkInfo::ClkInfo(const ClockEdge *clk_edge,
 		 const Pin *clk_src,
 		 bool is_propagated,
@@ -45,12 +44,12 @@ ClkInfo::ClkInfo(const ClockEdge *clk_edge,
 		 float latency,
 		 ClockUncertainties *uncertainties,
                  PathAPIndex path_ap_index,
-		 PathVertexRep &crpr_clk_path,
+		 Path *crpr_clk_path,
 		 const StaState *sta) :
   clk_edge_(clk_edge),
   clk_src_(clk_src),
   gen_clk_src_(gen_clk_src),
-  crpr_clk_path_(crpr_clk_path),
+  crpr_clk_path_(is_propagated ? crpr_clk_path : nullptr),
   uncertainties_(uncertainties),
   insertion_(insertion),
   latency_(latency),
@@ -79,7 +78,7 @@ ClkInfo::findHash(const StaState *sta)
     hashIncr(hash_, network->vertexId(clk_src_));
   if (gen_clk_src_)
     hashIncr(hash_, network->vertexId(gen_clk_src_));
-  hashIncr(hash_, crprClkVertexId());
+  hashIncr(hash_, crprClkVertexId(sta));
   if (uncertainties_) {
     float uncertainty;
     bool exists;
@@ -100,26 +99,39 @@ ClkInfo::findHash(const StaState *sta)
 }
 
 VertexId
-ClkInfo::crprClkVertexId() const
+ClkInfo::crprClkVertexId(const StaState *sta) const
 {
   if (crpr_clk_path_.isNull())
-    return 0;
+    return vertex_id_null;
   else
-    return crpr_clk_path_.vertexId();
+    return crpr_clk_path_.vertexId(sta);
 }
 
-const char *
-ClkInfo::asString(const StaState *sta) const
+Path *
+ClkInfo::crprClkPath(const StaState *sta)
+{
+  return Path::vertexPath(crpr_clk_path_, sta);
+}
+
+const Path *
+ClkInfo::crprClkPath(const StaState *sta) const
+{
+  return Path::vertexPath(crpr_clk_path_, sta);
+}
+
+std::string
+ClkInfo::to_string(const StaState *sta) const
 {
   Network *network = sta->network();
   Corners *corners = sta->corners();
-  string result;
+  std::string result;
 
   PathAnalysisPt *path_ap = corners->findPathAnalysisPt(path_ap_index_);
-  result += path_ap->pathMinMax()->asString();
+  result += path_ap->pathMinMax()->to_string();
   result += "/";
   result += std::to_string(path_ap_index_);
 
+  result += " ";
   if (clk_edge_)
     result += clk_edge_->name();
   else
@@ -139,9 +151,7 @@ ClkInfo::asString(const StaState *sta) const
   if (is_gen_clk_src_path_)
     result += " genclk";
 
-  char *tmp = makeTmpString(result.size() + 1);
-  strcpy(tmp, result.c_str());
-  return tmp;
+  return result;
 }
 
 const Clock *
@@ -153,7 +163,7 @@ ClkInfo::clock() const
     return nullptr;
 }
 
-RiseFall *
+const RiseFall *
 ClkInfo::pulseClkSense() const
 {
   if (is_pulse_clk_)
@@ -191,12 +201,12 @@ ClkInfoEqual::operator()(const ClkInfo *clk_info1,
   return clkInfoEqual(clk_info1, clk_info2, sta_);
 }
 
-static bool
+bool
 clkInfoEqual(const ClkInfo *clk_info1,
 	     const ClkInfo *clk_info2,
 	     const StaState *sta)
 {
-  bool crpr_on = sta->sdc()->crprActive();
+  bool crpr_on = sta->crprActive();
   ClockUncertainties *uncertainties1 = clk_info1->uncertainties();
   ClockUncertainties *uncertainties2 = clk_info2->uncertainties();
   return clk_info1->clkEdge() == clk_info2->clkEdge()
@@ -204,8 +214,9 @@ clkInfoEqual(const ClkInfo *clk_info1,
     && clk_info1->clkSrc() == clk_info2->clkSrc()
     && clk_info1->genClkSrc() == clk_info2->genClkSrc()
     && (!crpr_on
-	|| (PathVertexRep::equal(clk_info1->crprClkPath(),
-				 clk_info2->crprClkPath())))
+	|| Path::equal(clk_info1->crprClkPath(sta),
+                       clk_info2->crprClkPath(sta),
+                       sta))
     && ((uncertainties1 == nullptr
 	 && uncertainties2 == nullptr)
 	|| (uncertainties1 && uncertainties2
@@ -233,7 +244,7 @@ ClkInfoLess::operator()(const ClkInfo *clk_info1,
   return clkInfoCmp(clk_info1, clk_info2, sta_) < 0;
 }
 
-static int
+int
 clkInfoCmp(const ClkInfo *clk_info1,
 	   const ClkInfo *clk_info2,
 	   const StaState *sta)
@@ -268,11 +279,11 @@ clkInfoCmp(const ClkInfo *clk_info1,
   if (gen_clk_src1 > gen_clk_src2)
     return 1;
 
-  bool crpr_on = sta->sdc()->crprActive();
+  bool crpr_on = sta->crprActive();
   if (crpr_on) {
-    const PathVertexRep &crpr_path1 = clk_info1->crprClkPath();
-    const PathVertexRep &crpr_path2 = clk_info2->crprClkPath();
-    int path_cmp = PathVertexRep::cmp(crpr_path1, crpr_path2);
+    const Path *crpr_path1 = clk_info1->crprClkPath(sta);
+    const Path *crpr_path2 = clk_info2->crprClkPath(sta);
+    int path_cmp = Path::cmp(crpr_path1, crpr_path2, sta);
     if (path_cmp != 0)
       return path_cmp;
   }

@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "CheckMaxSkews.hh"
 
@@ -22,7 +30,7 @@
 #include "Network.hh"
 #include "Graph.hh"
 #include "Clock.hh"
-#include "PathVertex.hh"
+#include "Path.hh"
 #include "PathAnalysisPt.hh"
 #include "Search.hh"
 
@@ -187,17 +195,17 @@ CheckMaxSkews:: visitMaxSkewChecks(Vertex *vertex,
       Vertex *ref_vertex = edge->from(graph);
       TimingArcSet *arc_set = edge->timingArcSet();
       for (TimingArc *arc : arc_set->arcs()) {
-	RiseFall *clk_rf = arc->fromEdge()->asRiseFall();
-	RiseFall *ref_rf = arc->toEdge()->asRiseFall();
+	const RiseFall *clk_rf = arc->fromEdge()->asRiseFall();
+	const RiseFall *ref_rf = arc->toEdge()->asRiseFall();
 	VertexPathIterator clk_path_iter(vertex, clk_rf, clk_min_max, search);
 	while (clk_path_iter.hasNext()) {
-	  PathVertex *clk_path = clk_path_iter.next();
+	  Path *clk_path = clk_path_iter.next();
 	  if (clk_path->isClock(search)) {
 	    const PathAnalysisPt *clk_ap = clk_path->pathAnalysisPt(sta_);
 	    PathAnalysisPt *ref_ap = clk_ap->tgtClkAnalysisPt();
 	    VertexPathIterator ref_path_iter(ref_vertex, ref_rf, ref_ap, sta_);
 	    while (ref_path_iter.hasNext()) {
-	      PathVertex *ref_path = ref_path_iter.next();
+	      Path *ref_path = ref_path_iter.next();
 	      if (ref_path->isClock(search)) {
 		MaxSkewCheck check(clk_path, ref_path, arc, edge);
 		visitor->visit(check, sta_);
@@ -212,8 +220,8 @@ CheckMaxSkews:: visitMaxSkewChecks(Vertex *vertex,
 
 ////////////////////////////////////////////////////////////////
 
-MaxSkewCheck::MaxSkewCheck(PathVertex *clk_path,
-			   PathVertex *ref_path,
+MaxSkewCheck::MaxSkewCheck(Path *clk_path,
+			   Path *ref_path,
 			   TimingArc *check_arc,
 			   Edge *check_edge) :
   clk_path_(clk_path),
@@ -226,34 +234,34 @@ MaxSkewCheck::MaxSkewCheck(PathVertex *clk_path,
 Pin *
 MaxSkewCheck::clkPin(const StaState *sta) const
 {
-  return clk_path_.pin(sta);
+  return clk_path_->pin(sta);
 }
 
 Pin *
 MaxSkewCheck::refPin(const StaState *sta) const
 {
-  return ref_path_.pin(sta);
+  return ref_path_->pin(sta);
 }
 
 ArcDelay
 MaxSkewCheck::maxSkew(const StaState *sta) const
 {
   Search *search = sta->search();
-  return search->deratedDelay(ref_path_.vertex(sta),
+  return search->deratedDelay(ref_path_->vertex(sta),
 			      check_arc_, check_edge_, false,
-			      clk_path_.pathAnalysisPt(sta));
+			      clk_path_->pathAnalysisPt(sta));
 }
 
 Delay
-MaxSkewCheck::skew(const StaState *sta) const
+MaxSkewCheck::skew() const
 {
-  return Delay(clk_path_.arrival(sta) - ref_path_.arrival(sta));
+  return Delay(clk_path_->arrival() - ref_path_->arrival());
 }
 
 Slack
 MaxSkewCheck::slack(const StaState *sta) const
 {
-  return maxSkew(sta) - skew(sta);
+  return maxSkew(sta) - skew();
 }
 
 ////////////////////////////////////////////////////////////////

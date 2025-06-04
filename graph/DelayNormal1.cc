@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "Delay.hh"
 
@@ -24,6 +32,7 @@
 #include "Fuzzy.hh"
 #include "Units.hh"
 #include "StaState.hh"
+#include "Variables.hh"
 
 // SSTA compilation.
 #if (SSTA == 1)
@@ -58,6 +67,12 @@ Delay::Delay() :
 }
 
 Delay::Delay(const Delay &delay) :
+  mean_(delay.mean_),
+  sigma2_(delay.sigma2_)
+{
+}
+
+Delay::Delay(const DelayDbl &delay) :
   mean_(delay.mean_),
   sigma2_(delay.sigma2_)
 {
@@ -173,6 +188,35 @@ Delay::operator==(const Delay &delay) const
 
 ////////////////////////////////////////////////////////////////
 
+DelayDbl::DelayDbl() :
+  mean_(0.0),
+  sigma2_(0.0)
+{
+}
+
+void
+DelayDbl::operator=(float delay)
+{
+  mean_ = delay;
+  sigma2_ = 0.0;
+}
+
+void
+DelayDbl::operator+=(const Delay &delay)
+{
+  mean_ += delay.mean_;
+  sigma2_ += delay.sigma2_;
+}
+
+void
+DelayDbl::operator-=(const Delay &delay)
+{
+  mean_ -= delay.mean_;
+  sigma2_ += delay.sigma2_;
+}
+
+////////////////////////////////////////////////////////////////
+
 Delay
 makeDelay(float delay,
 	  float sigma,
@@ -194,7 +238,7 @@ delayAsFloat(const Delay &delay,
 	     const EarlyLate *early_late,
 	     const StaState *sta)
 {
-  if (sta->pocvEnabled()) {
+  if (sta->variables()->pocvEnabled()) {
     if (early_late == EarlyLate::early())
       return delay.mean() - delay.sigma() * sta->sigmaFactor();
     else if (early_late == EarlyLate::late())
@@ -225,7 +269,7 @@ delayAsString(const Delay &delay,
 	      int digits)
 {
   const Unit *unit = sta->units()->timeUnit();
-  if (sta->pocvEnabled()) {
+  if (sta->variables()->pocvEnabled()) {
     float sigma = delay.sigma();
     return stringPrintTmp("%s[%s]",
 			  unit->asString(delay.mean(), digits),

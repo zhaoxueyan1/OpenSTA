@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -43,7 +51,7 @@ typedef std::map<const Pin*, float> ConcreteElmoreLoadMap;
 typedef std::map<const Pin*, ConcretePoleResidue> ConcretePoleResidueMap;
 typedef std::map<NetIdPair,ConcreteParasiticNode*,
                  NetIdPairLess> ConcreteParasiticSubNodeMap;
-typedef std::map<const Pin*, ConcreteParasiticNode*, PinIdLess> ConcreteParasiticPinNodeMap;
+typedef std::map<const Pin*,ConcreteParasiticNode*,PinIdLess> ConcreteParasiticPinNodeMap;
 typedef std::set<ParasiticNode*> ParasiticNodeSet;
 typedef std::set<ParasiticResistor*> ParasiticResistorSet;
 typedef std::vector<ParasiticResistor*> ParasiticResistorSeq;
@@ -207,7 +215,7 @@ public:
                            const Network *network);
   virtual ~ConcreteParasiticNetwork();
   virtual bool isParasiticNetwork() const { return true; }
-  const Net *net() { return net_; }
+  const Net *net() const { return net_; }
   bool includesPinCaps() const { return includes_pin_caps_; }
   ConcreteParasiticNode *findParasiticNode(const Net *net,
                                            int id,
@@ -262,6 +270,7 @@ public:
   float capacitance() const { return cap_; }
   const char *name(const Network *network) const;
   const Net *net(const Network *network) const;
+  unsigned id() const { return id_; }
   bool isExternal() const { return is_external_; }
   const Pin *pin() const;
   void incrCapacitance(float cap);

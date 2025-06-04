@@ -1,5 +1,5 @@
 # OpenSTA, Static Timing Analyzer
-# Copyright (c) 2024, Parallax Software, Inc.
+# Copyright (c) 2025, Parallax Software, Inc.
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
+# 
+# The origin of this software must not be misrepresented; you must not
+# claim that you wrote the original software.
+# 
+# Altered source versions must be plainly marked as such, and must not be
+# misrepresented as being the original software.
+# 
+# This notice may not be removed or altered from any source distribution.
 
 namespace eval sta {
 
@@ -171,7 +179,7 @@ proc get_timing_edges_cmd { cmd cmd_args } {
     cmd_usage_error $cmd
   }
   if [info exists keys(-filter)] {
-    set arcs [filter_timing_arcs1 $keys(-filter) $arcs]
+    set arcs [filter_objs $keys(-filter) $arcs filter_timing_arcs "timing arc"]
   }
   return $arcs
 }
@@ -258,34 +266,6 @@ proc get_timing_arcs_to { to_pin_arg } {
     $edge_iter finish
   }
   return $edges
-}
-
-proc filter_timing_arcs1 { filter objects } {
-  variable filter_regexp1
-  variable filter_or_regexp
-  variable filter_and_regexp
-  set filtered_objects {}
-  # Ignore sub-exprs in filter_regexp1 for expr2 match var.
-  if { [regexp $filter_or_regexp $filter ignore expr1 \
-	  ignore ignore ignore expr2] } {
-    regexp $filter_regexp1 $expr1 ignore attr_name op arg
-    set filtered_objects1 [filter_timing_arcs $attr_name $op $arg $objects]
-    regexp $filter_regexp1 $expr2 ignore attr_name op arg
-    set filtered_objects2 [filter_timing_arcs $attr_name $op $arg $objects]
-    set filtered_objects [concat $filtered_objects1 $filtered_objects2]
-  } elseif { [regexp $filter_and_regexp $filter ignore expr1 \
-		ignore ignore ignore expr2] } {
-    regexp $filter_regexp1 $expr1 ignore attr_name op arg
-    set filtered_objects [filter_timing_arcs $attr_name $op $arg $objects]
-    regexp $filter_regexp1 $expr2 ignore attr_name op arg
-    set filtered_objects [filter_timing_arcs $attr_name $op \
-			    $arg $filtered_objects]
-  } elseif { [regexp $filter_regexp1 $filter ignore attr_name op arg] } {
-    set filtered_objects [filter_timing_arcs $attr_name $op $arg $objects]
-  } else {
-    sta_error 541 "unsupported -filter expression."
-  }
-  return $filtered_objects
 }
 
 ################################################################

@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -34,7 +42,6 @@ class OperatingConditions;
 class BusDcl;
 class ModeDef;
 class ModeValueDef;
-class TestCell;
 class TableTemplate;
 class Table;
 class TableModel;
@@ -42,7 +49,6 @@ class TableAxis;
 class GateTimingModel;
 class CheckTimingModel;
 class ScaleFactors;
-class Group;
 class Wireload;
 class WireloadSelection;
 class TimingArcSet;
@@ -58,6 +64,8 @@ class Transition;
 class RiseFall;
 class RiseFallBoth;
 class ReceiverModel;
+class Statetable;
+class StatetableRow;
 
 typedef Vector<LibertyLibrary*> LibertyLibrarySeq;
 typedef Vector<LibertyCell*> LibertyCellSeq;
@@ -71,6 +79,7 @@ typedef std::shared_ptr<Table> TablePtr;
 typedef std::shared_ptr<TimingArcAttrs> TimingArcAttrsPtr;
 typedef std::shared_ptr<TableAxis> TableAxisPtr;
 typedef std::shared_ptr<ReceiverModel> ReceiverModelPtr;
+typedef std::vector<StatetableRow> StatetableRows;
 
 enum class ScaleFactorType : unsigned {
   pin_cap,

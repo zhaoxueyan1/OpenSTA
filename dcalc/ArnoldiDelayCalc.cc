@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 // (c) 2018 Nefelus, Inc.
 //
@@ -40,6 +48,7 @@
 #include "ArcDelayCalc.hh"
 #include "LumpedCapDelayCalc.hh"
 #include "GraphDelayCalc.hh"
+#include "Variables.hh"
 #include "Arnoldi.hh"
 #include "ArnoldiReduce.hh"
 
@@ -55,7 +64,9 @@ namespace sta {
 //  ra_get_r
 //  ra_get_s
 
+using std::string;
 using std::abs;
+using std::vector;
 
 struct delay_work;
 struct delay_c;
@@ -115,6 +126,7 @@ public:
   ArnoldiDelayCalc(StaState *sta);
   virtual ~ArnoldiDelayCalc();
   ArcDelayCalc *copy() override;
+  const char *name() const override { return "arnoldi"; }
   Parasitic *findParasitic(const Pin *drvr_pin,
                            const RiseFall *rf,
                            const DcalcAnalysisPt *dcalc_ap) override;
@@ -225,6 +237,7 @@ private:
   ArnoldiReduce *reduce_;
   delay_work *delay_work_;
   vector<rcmodel*> unsaved_parasitics_;
+  bool pocv_enabled_;
 };
 
 ArcDelayCalc *
@@ -382,7 +395,8 @@ ArnoldiDelayCalc::gateDelay(const Pin *drvr_pin,
   ConcreteParasitic *cparasitic =
     reinterpret_cast<ConcreteParasitic*>(const_cast<Parasitic*>(parasitic));
   rcmodel_ = dynamic_cast<rcmodel*>(cparasitic);
-  GateTableModel *table_model = gateTableModel(arc, dcalc_ap);
+  pocv_enabled_ = variables_->pocvEnabled();
+  GateTableModel *table_model = arc->gateTableModel(dcalc_ap);
   if (table_model && rcmodel_) {
     const Pvt *pvt = pinPvt(drvr_pin, dcalc_ap);
     return gateDelaySlew(drvr_cell, arc, table_model, in_slew, load_pin_index_map, pvt);

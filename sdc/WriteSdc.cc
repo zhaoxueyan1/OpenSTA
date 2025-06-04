@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "WriteSdc.hh"
 
@@ -47,9 +55,12 @@
 #include "Fuzzy.hh"
 #include "StaState.hh"
 #include "Corner.hh"
+#include "Variables.hh"
 #include "WriteSdcPvt.hh"
 
 namespace sta {
+
+using std::string;
 
 typedef Set<ClockSense*> ClockSenseSet;
 typedef Vector<ClockSense*> ClockSenseSeq;
@@ -382,7 +393,7 @@ WriteSdc::writeClocks() const
 {
   // Write clocks in the order they were defined because generated
   // clocks depend on master clocks having been previously defined.
-  for (auto clk : sdc_->clocks_) {
+  for (const auto clk : sdc_->clocks_) {
     if (clk->isGenerated())
       writeGeneratedClock(clk);
     else
@@ -852,8 +863,8 @@ void
 WriteSdc::writeClockSenses() const
 {
   Vector<PinClockPair> pin_clks;
-  for (auto iter : sdc_->clk_sense_map_)
-    pin_clks.push_back(iter.first);
+  for (const auto& [pin_clk, sense] : sdc_->clk_sense_map_)
+    pin_clks.push_back(pin_clk);
 
   // Sort by pin/clk pair so regressions results are stable.
   sort(pin_clks, PinClockPairNameLess(sdc_network_));
@@ -937,10 +948,8 @@ ClockGroupLess::operator()(const ClockGroup *clk_group1,
 void
 WriteSdc::writeClockGroups() const
 {
-  for (auto &name_groups : sdc_->clk_groups_name_map_) {
-    ClockGroups *clk_groups = name_groups.second;
+  for (const auto [name, clk_groups] : sdc_->clk_groups_name_map_)
     writeClockGroups(clk_groups);
-  }
 }
 
 void
@@ -1174,7 +1183,7 @@ void
 WriteSdc::writeDisabledEdgeSense(Edge *edge) const
 {
   gzprintf(stream_, "set_disable_timing ");
-  const char *sense = timingSenseString(edge->sense());
+  const char *sense = to_string(edge->sense());
   string filter;
   stringPrint(filter, "sense == %s", sense);
   writeGetTimingArcs(edge, filter.c_str());
@@ -1408,8 +1417,7 @@ void
 WriteSdc::writeDataChecks() const
 {
   Vector<DataCheck*> checks;
-  for (auto pin_checks : sdc_->data_checks_to_map_) {
-    DataCheckSet *checks1 = pin_checks.second;
+  for (const auto [pin, checks1] : sdc_->data_checks_to_map_) {
     for (DataCheck *check : *checks1)
       checks.push_back(check);
   }
@@ -1446,9 +1454,9 @@ WriteSdc::writeDataCheck(DataCheck *check) const
 
 void
 WriteSdc::writeDataCheck(DataCheck *check,
-			 RiseFallBoth *from_rf,
-			 RiseFallBoth *to_rf,
-			 SetupHold *setup_hold,
+			 const RiseFallBoth *from_rf,
+			 const RiseFallBoth *to_rf,
+			 const SetupHold *setup_hold,
 			 float margin) const
 {
   const char *from_key = "-from";
@@ -1512,9 +1520,7 @@ void
 WriteSdc::writeNetLoads() const
 {
   int corner_index = 0; // missing corner arg
-  for (auto net_cap : sdc_->net_wire_cap_maps_[corner_index]) {
-    const Net *net = net_cap.first;
-    MinMaxFloatValues &caps = net_cap.second;
+  for (const auto [net, caps] : sdc_->net_wire_cap_maps_[corner_index]) {
     float min_cap, max_cap;
     bool min_exists, max_exists;
     caps.value(MinMax::min(), min_cap, min_exists);
@@ -1713,7 +1719,7 @@ WriteSdc::writeInputTransitions() const
     Port *port = port_iter->next();
     InputDrive *drive = sdc_->findInputDrive(port);
     if (drive) {
-      RiseFallMinMax *slews = drive->slews();
+      const RiseFallMinMax *slews = drive->slews();
       WriteGetPort write_port(port, this);
       writeRiseFallMinMaxTimeCmd("set_input_transition", slews, write_port);
     }
@@ -1725,10 +1731,8 @@ void
 WriteSdc::writeNetResistances() const
 {
   NetSeq nets;
-  for (auto net_res : sdc_->netResistances()) {
-    const Net *net = net_res.first;
+  for (const auto [net, res] : sdc_->netResistances())
     nets.push_back(net);
-  }
   sort(nets, NetPathNameLess(sdc_network_));
   for (const Net *net : nets) {
     float min_res, max_res;
@@ -1843,10 +1847,8 @@ void
 WriteSdc::sortedLogicValuePins(LogicValueMap &value_map,
 			       PinSeq &pins) const
 {
-  for (auto pin_value : value_map) {
-    const Pin *pin = pin_value.first;
+  for (const auto [pin, value] : value_map)
     pins.push_back(pin);
-  }
   // Sort pins.
   sort(pins, PinPathNameLess(sdc_network_));
 }
@@ -1860,9 +1862,7 @@ WriteSdc::writeDeratings() const
   if (factors)
     writeDerating(factors);
 
-  for (auto net_derating : sdc_->net_derating_factors_) {
-    const Net *net = net_derating.first;
-    DeratingFactorsNet *factors = net_derating.second;
+  for (const auto [net, factors] : sdc_->net_derating_factors_) {
     WriteGetNet write_net(net, this);
     for (auto early_late : EarlyLate::range()) {
       writeDerating(factors, TimingDerateType::net_delay, early_late,
@@ -1870,16 +1870,12 @@ WriteSdc::writeDeratings() const
     }
   }
 
-  for (auto inst_derating : sdc_->inst_derating_factors_) {
-    const Instance *inst = inst_derating.first;
-    DeratingFactorsCell *factors = inst_derating.second;
+  for (const auto [inst, factors] : sdc_->inst_derating_factors_) {
     WriteGetInstance write_inst(inst, this);
     writeDerating(factors, &write_inst);
   }
 
-  for (auto cell_derating : sdc_->cell_derating_factors_) {
-    const LibertyCell *cell = cell_derating.first;
-    DeratingFactorsCell *factors = cell_derating.second;
+  for (const auto [cell, factors] : sdc_->cell_derating_factors_) {
     WriteGetLibCell write_cell(cell, this);
     writeDerating(factors, &write_cell);
   }
@@ -2029,12 +2025,10 @@ WriteSdc::writeVoltages() const
       gzprintf(stream_, "set_voltage %.3f\n", voltage_max);
   }
 
-  for (auto net_volt : sdc_->net_voltage_map_) {
-    const Net *net = net_volt.first;
-    MinMaxFloatValues &values = net_volt.second;
-    values.value(MinMax::max(), voltage_max, exists_max);
+  for (const auto& [net, volts] : sdc_->net_voltage_map_) {
+    volts.value(MinMax::max(), voltage_max, exists_max);
     if (exists_max) {
-      values.value(MinMax::min(), voltage_min, exists_min);
+      volts.value(MinMax::min(), voltage_min, exists_min);
       if (exists_min)
         gzprintf(stream_, "set_voltage -object_list %s -min %.3f %.3f\n",
                  sdc_network_->pathName(net),
@@ -2065,23 +2059,17 @@ WriteSdc::writeDesignRules() const
 void
 WriteSdc::writeMinPulseWidths() const
 {
-  for (auto pin_widths : sdc_->pin_min_pulse_width_map_) {
-    const Pin *pin = pin_widths.first;
-    RiseFallValues *min_widths = pin_widths.second;
+  for (const auto [pin, min_widths] : sdc_->pin_min_pulse_width_map_) {
     WriteGetPin write_obj(pin, false, this);
     writeMinPulseWidths(min_widths, write_obj);
   }
 
-  for (auto inst_widths : sdc_->inst_min_pulse_width_map_) {
-    const Instance *inst = inst_widths.first;
-    RiseFallValues *min_widths = inst_widths.second;
+  for (const auto [inst, min_widths] : sdc_->inst_min_pulse_width_map_) {
     WriteGetInstance write_obj(inst, this);
     writeMinPulseWidths(min_widths, write_obj);
   }
 
-  for (auto clk_widths : sdc_->clk_min_pulse_width_map_) {
-    const Clock *clk = clk_widths.first;
-    RiseFallValues *min_widths = clk_widths.second;
+  for (const auto [clk, min_widths] : sdc_->clk_min_pulse_width_map_) {
     WriteGetClock write_obj(clk, this);
     writeMinPulseWidths(min_widths, write_obj);
   }
@@ -2123,9 +2111,7 @@ WriteSdc::writeMinPulseWidth(const char *hi_low,
 void
 WriteSdc::writeLatchBorowLimits() const
 {
-  for (auto pin_borrow : sdc_->pin_latch_borrow_limit_map_) {
-    const Pin *pin = pin_borrow.first;
-    float limit = pin_borrow.second;
+  for (const auto [pin, limit] : sdc_->pin_latch_borrow_limit_map_) {
     gzprintf(stream_, "set_max_time_borrow ");
     writeTime(limit);
     gzprintf(stream_, " ");
@@ -2133,9 +2119,7 @@ WriteSdc::writeLatchBorowLimits() const
     gzprintf(stream_, "\n");
   }
 
-  for (auto inst_borrow : sdc_->inst_latch_borrow_limit_map_) {
-    const Instance *inst = inst_borrow.first;
-    float limit = inst_borrow.second;
+  for (const auto [inst, limit] : sdc_->inst_latch_borrow_limit_map_) {
     gzprintf(stream_, "set_max_time_borrow ");
     writeTime(limit);
     gzprintf(stream_, " ");
@@ -2143,9 +2127,7 @@ WriteSdc::writeLatchBorowLimits() const
     gzprintf(stream_, "\n");
   }
 
-  for (auto clk_borrow : sdc_->clk_latch_borrow_limit_map_) {
-    const Clock *clk = clk_borrow.first;
-    float limit = clk_borrow.second;
+  for (const auto [clk, limit] : sdc_->clk_latch_borrow_limit_map_) {
     gzprintf(stream_, "set_max_time_borrow ");
     writeTime(limit);
     gzprintf(stream_, " ");
@@ -2266,12 +2248,10 @@ WriteSdc::writeCapLimits(const MinMax *min_max,
     gzprintf(stream_, " [current_design]\n");
   }
 
-  for (auto port_limit : sdc_->port_cap_limit_map_) {
-    const Port *port = port_limit.first;
-    MinMaxFloatValues values = port_limit.second;
+  for (const auto [port, limits] : sdc_->port_cap_limit_map_) {
     float cap;
     bool exists;
-    values.value(min_max, cap, exists);
+    limits.value(min_max, cap, exists);
     if (exists) {
       gzprintf(stream_, "%s ", cmd);
       writeCapacitance(cap);
@@ -2281,12 +2261,10 @@ WriteSdc::writeCapLimits(const MinMax *min_max,
     }
   }
 
-  for (auto pin_limit : sdc_->pin_cap_limit_map_) {
-    const Pin *pin = pin_limit.first;
-    MinMaxFloatValues values = pin_limit.second;
+  for (const auto [pin, limits] : sdc_->pin_cap_limit_map_) {
     float cap;
     bool exists;
-    values.value(min_max, cap, exists);
+    limits.value(min_max, cap, exists);
     if (exists) {
       gzprintf(stream_, "%s ", cmd);
       writeCapacitance(cap);
@@ -2349,13 +2327,13 @@ WriteSdc::writeFanoutLimits(const MinMax *min_max,
 void
 WriteSdc::writeVariables() const
 {
-  if (sdc_->propagateAllClocks()) {
+  if (variables_->propagateAllClocks()) {
     if (native_)
       gzprintf(stream_, "set sta_propagate_all_clocks 1\n");
     else
       gzprintf(stream_, "set timing_all_clocks_propagated true\n");
   }
-  if (sdc_->presetClrArcsEnabled()) {
+  if (variables_->presetClrArcsEnabled()) {
     if (native_)
       gzprintf(stream_, "set sta_preset_clear_arcs_enabled 1\n");
     else

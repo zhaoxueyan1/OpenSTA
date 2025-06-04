@@ -1,5 +1,5 @@
 # OpenSTA, Static Timing Analyzer
-# Copyright (c) 2024, Parallax Software, Inc.
+# Copyright (c) 2025, Parallax Software, Inc.
 # 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 # 
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
+# 
+# The origin of this software must not be misrepresented; you must not
+# claim that you wrote the original software.
+# 
+# Altered source versions must be plainly marked as such, and must not be
+# misrepresented as being the original software.
+# 
+# This notice may not be removed or altered from any source distribution.
 
 ################################################################
 #
@@ -78,8 +86,8 @@ proc get_object_args { objects clks_var libcells_var libports_var \
   foreach obj $objects {
     if { [llength $obj] > 1 } {
       # List arg. Recursive call without initing objects.
-      get_object_args $obj clks libcells libports cells insts \
-	ports pins nets edges timing_arc_sets
+      get_object_args $obj $clks_var $libcells_var $libports_var $cells_var $insts_var \
+	$ports_var $pins_var $nets_var $edges_var $timing_arc_sets_var
     } elseif { [is_object $obj] } {
       # Explicit object arg.
       set object_type [object_type $obj]
@@ -117,7 +125,6 @@ proc get_object_args { objects clks_var libcells_var libports_var \
       if { $matches != {} } {
 	set clks [concat $clks $matches]
       } else {
-	
 	if { $libcells_var != {} } {
 	  set matches [get_lib_cells -quiet $obj]
 	}
@@ -400,12 +407,21 @@ proc parse_corner { keys_var } {
   upvar 1 $keys_var keys
 
   if { [info exists keys(-corner)] } {
-    set corner_name $keys(-corner)
-    set corner [find_corner $corner_name]
-    if { $corner == "NULL" } {
-      sta_error 102 "$corner_name is not the name of process corner."
+    set corner_arg $keys(-corner)
+    if { [is_object $corner_arg] } {
+      set object_type [object_type $corner_arg]
+      if { $object_type == "Corner" } {
+        return $corner_arg
+      } else {
+        sta_error 144 "corner object type '$object_type' is not a corner."
+      }
     } else {
-      return $corner
+      set corner [find_corner $corner_arg]
+      if { $corner == "NULL" } {
+        sta_error 102 "$corner_arg is not the name of process corner."
+      } else {
+        return $corner
+      }
     }
   } elseif { [multi_corner] } {
     sta_error 103 "-corner keyword required with multi-corner analysis."
@@ -510,7 +526,7 @@ proc parse_min_max_all_flags { flags_var } {
   } elseif { [info exists flags(-max)] && ![info exists flags(-min)] } {
     return "max"
   } else {
-    return "all"
+    return "min_max"
   }
 }
 
@@ -518,13 +534,13 @@ proc parse_min_max_all_flags { flags_var } {
 proc parse_min_max_all_check_flags { flags_var } {
   upvar 1 $flags_var flags
   if { [info exists flags(-min)] && [info exists flags(-max)] } {
-    return "all"
+    return "min_max"
   } elseif { [info exists flags(-min)] && ![info exists flags(-max)] } {
     return "min"
   } elseif { [info exists flags(-max)] && ![info exists flags(-min)] } {
     return "max"
   } else {
-    return "all"
+    return "min_max"
   }
 }
 
@@ -550,7 +566,7 @@ proc parse_early_late_all_flags { flags_var } {
   } elseif { [info exists flags(-late)] && ![info exists flags(-early)] } {
     return "max"
   } else {
-    return "all"
+    return "min_max"
   }
 }
 
@@ -716,6 +732,33 @@ proc get_instances_error { arg_name arglist } {
     }
   }
   return $insts
+}
+
+proc get_libcells_error { arg_name arglist } {
+  set libcells {}
+  # Copy backslashes that will be removed by foreach.
+  set arglist [string map {\\ \\\\} $arglist]
+  foreach arg $arglist {
+    if {[llength $arg] > 1} {
+      # Embedded list.
+      set libcells [concat $libcells [get_libcells_error $arg_name $arg]]
+    } elseif { [is_object $arg] } {
+      set object_type [object_type $arg]
+      if { $object_type == "LibertyCell" } {
+        lappend libcells $arg
+      } else {
+        sta_error 128 "$arg_name type '$object_type' is not a liberty cell."
+      }
+    } elseif { $arg != {} } {
+      set arg_libcells [get_lib_cells -quiet $arg]
+      if { $arg_libcells != {} } {
+        set libcells [concat $libcells $arg_libcells]
+      } else {
+        sta_error 129 "liberty cell '$arg' not found."
+      }
+    }
+  }
+  return $libcells
 }
 
 proc get_port_pin_warn { arg_name arg } {

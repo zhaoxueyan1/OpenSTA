@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "PathGroup.hh"
 
@@ -38,36 +46,36 @@
 
 namespace sta {
 
-int PathGroup::group_count_max = std::numeric_limits<int>::max();
+size_t PathGroup::group_path_count_max = std::numeric_limits<size_t>::max();
 
 PathGroup *
 PathGroup::makePathGroupSlack(const char *name,
-			      int group_count,
-			      int endpoint_count,
+			      int group_path_count,
+			      int endpoint_path_count,
 			      bool unique_pins,
 			      float slack_min,
 			      float slack_max,
 			      const StaState *sta)
 {
-  return new PathGroup(name, group_count, endpoint_count, unique_pins,
+  return new PathGroup(name, group_path_count, endpoint_path_count, unique_pins,
 		       slack_min, slack_max, true, MinMax::min(), sta);
 }
 
 PathGroup *
 PathGroup::makePathGroupArrival(const char *name,
-				int group_count,
-				int endpoint_count,
+				int group_path_count,
+				int endpoint_path_count,
 				bool unique_pins,
 				const MinMax *min_max,
 				const StaState *sta)
 {
-  return new PathGroup(name, group_count, endpoint_count, unique_pins,
+  return new PathGroup(name, group_path_count, endpoint_path_count, unique_pins,
 		       0.0, 0.0, false, min_max, sta);
 }
 
 PathGroup::PathGroup(const char *name,
-		     int group_count,
-		     int endpoint_count,
+		     size_t group_path_count,
+		     size_t endpoint_path_count,
 		     bool unique_pins,
 		     float slack_min,
 		     float slack_max,
@@ -75,8 +83,8 @@ PathGroup::PathGroup(const char *name,
 		     const MinMax *min_max,
 		     const StaState *sta) :
   name_(name),
-  group_count_(group_count),
-  endpoint_count_(endpoint_count),
+  group_path_count_(group_path_count),
+  endpoint_path_count_(endpoint_path_count),
   unique_pins_(unique_pins),
   slack_min_(slack_min),
   slack_max_(slack_max),
@@ -93,29 +101,66 @@ PathGroup::~PathGroup()
 }
 
 bool
-PathGroup::savable(PathEnd *path_end)
+PathGroup::saveable(PathEnd *path_end)
 {
-  bool savable = false;
+  float threshold;
+  {
+    LockGuard lock(lock_);
+    threshold = threshold_;
+  }
   if (compare_slack_) {
     // Crpr increases the slack, so check the slack
     // without crpr first because it is expensive to find.
     Slack slack = path_end->slackNoCrpr(sta_);
     if (!delayIsInitValue(slack, min_max_)
- 	&& delayLessEqual(slack, threshold_, sta_)
+ 	&& delayLessEqual(slack, threshold, sta_)
  	&& delayLessEqual(slack, slack_max_, sta_)) {
       // Now check with crpr.
       slack = path_end->slack(sta_);
-      savable = delayLessEqual(slack, threshold_, sta_)
+      return delayLessEqual(slack, threshold, sta_)
  	&& delayLessEqual(slack, slack_max_, sta_)
  	&& delayGreaterEqual(slack, slack_min_, sta_);
     }
   }
   else {
     const Arrival &arrival = path_end->dataArrivalTime(sta_);
-    savable = !delayIsInitValue(arrival, min_max_)
-      && delayGreaterEqual(arrival, threshold_, min_max_, sta_);
+    return !delayIsInitValue(arrival, min_max_)
+      && delayGreaterEqual(arrival, threshold, min_max_, sta_);
   }
-  return savable;
+  return false;
+}
+
+// endpoint_path_count > 1 with slack_min requires
+// saving endpoints with slack > slack_min so that
+// path enumeration can find them. Use the path end
+// with the min(max) delay to prune ends that cannot
+// onion peel down to slack_min.
+bool
+PathGroup::enumMinSlackUnderMin(PathEnd *path_end)
+{
+  if (compare_slack_
+      && endpoint_path_count_ > 1
+      && slack_min_ > -INF) {
+    const Path *path = path_end->path();
+    PathAnalysisPt *other_ap = path->pathAnalysisPt(sta_)->tgtClkAnalysisPt();
+    const Tag *tag = path->tag(sta_);
+    VertexPathIterator other_iter(path->vertex(sta_),
+                                  path->transition(sta_),
+                                  other_ap, sta_);
+    while (other_iter.hasNext()) {
+      Path *other = other_iter.next();
+      if (tagMatchCrpr(other->tag(sta_), tag)) {
+        PathEnd *end_min = path_end->copy();
+        end_min->setPath(other);
+        float slack = delayAsFloat(end_min->slackNoCrpr(sta_));
+        bool slack_under = fuzzyGreater(slack, slack_min_);
+        delete end_min;
+        if (slack_under)
+          return true;
+      }
+    }
+  }
+  return false;
 }
 
 void
@@ -123,8 +168,8 @@ PathGroup::insert(PathEnd *path_end)
 {
   LockGuard lock(lock_);
   path_ends_.push_back(path_end);
-  if (group_count_ != group_count_max
-      && static_cast<int>(path_ends_.size()) > group_count_ * 2)
+  if (group_path_count_ != group_path_count_max
+      && path_ends_.size() > group_path_count_ * 2)
     prune();
 }
 
@@ -133,13 +178,14 @@ PathGroup::prune()
 {
   sort();
   VertexPathCountMap path_counts;
-  int end_count = 0;
+  size_t end_count = 0;
   for (unsigned i = 0; i < path_ends_.size(); i++) {
     PathEnd *path_end = path_ends_[i];
     Vertex *vertex = path_end->vertex(sta_);
-    // Squish up to endpoint_count path ends per vertex up to the front of path_ends_.
-    if (end_count < group_count_
-	&& path_counts[vertex] < endpoint_count_) {
+    // Squish up to endpoint_path_count path ends per vertex
+    // up to the front of path_ends_.
+    if (end_count < group_path_count_
+	&& path_counts[vertex] < endpoint_path_count_) {
       path_ends_[end_count++] = path_end;
       path_counts[vertex]++;
     }
@@ -175,7 +221,7 @@ PathGroup::iterator()
 void
 PathGroup::ensureSortedMaxPaths()
 {
-  if (static_cast<int>(path_ends_.size()) > group_count_)
+  if (path_ends_.size() > group_path_count_)
     prune();
   else
     sort();
@@ -211,8 +257,8 @@ PathGroups::isGroupPathName(const char *group_name)
     || stringEq(group_name, unconstrained_group_name_);
 }
 
-PathGroups::PathGroups(int group_count,
-		       int endpoint_count,
+PathGroups::PathGroups(int group_path_count,
+		       int endpoint_path_count,
 		       bool unique_pins,
 		       float slack_min,
 		       float slack_max,
@@ -226,23 +272,25 @@ PathGroups::PathGroups(int group_count,
 		       bool unconstrained,
 		       const StaState *sta) :
   StaState(sta),
-  group_count_(group_count),
-  endpoint_count_(endpoint_count),
+  group_path_count_(group_path_count),
+  endpoint_path_count_(endpoint_path_count),
   unique_pins_(unique_pins),
   slack_min_(slack_min),
   slack_max_(slack_max)
 {
-  makeGroups(group_count, endpoint_count, unique_pins, slack_min, slack_max, group_names,
+  makeGroups(group_path_count, endpoint_path_count, unique_pins,
+	     slack_min, slack_max, group_names,
 	     setup, recovery, clk_gating_setup, unconstrained,
 	     MinMax::max());
-  makeGroups(group_count, endpoint_count, unique_pins, slack_min, slack_max, group_names,
+  makeGroups(group_path_count, endpoint_path_count, unique_pins,
+	     slack_min, slack_max, group_names,
 	     hold, removal, clk_gating_hold, unconstrained,
 	     MinMax::min());
 }
 
 void
-PathGroups::makeGroups(int group_count,
-		       int endpoint_count,
+PathGroups::makeGroups(int group_path_count,
+		       int endpoint_path_count,
 		       bool unique_pins,
 		       float slack_min,
 		       float slack_max,
@@ -255,11 +303,12 @@ PathGroups::makeGroups(int group_count,
 {
   int mm_index = min_max->index();
   if (setup_hold) {
-    for (auto name_group : sdc_->groupPaths()) {
-      const char *name = name_group.first;
+    for (const auto [name, group] : sdc_->groupPaths()) {
       if (reportGroup(name, group_names)) {
-	PathGroup *group = PathGroup::makePathGroupSlack(name, group_count,
-							 endpoint_count, unique_pins,
+	PathGroup *group = PathGroup::makePathGroupSlack(name,
+							 group_path_count,
+							 endpoint_path_count,
+							 unique_pins,
 							 slack_min, slack_max,
 							 this);
 	named_map_[mm_index][name] = group;
@@ -269,8 +318,10 @@ PathGroups::makeGroups(int group_count,
     for (auto clk : sdc_->clks()) {
       const char *clk_name = clk->name();
       if (reportGroup(clk_name, group_names)) {
-	PathGroup *group = PathGroup::makePathGroupSlack(clk_name, group_count,
-							 endpoint_count, unique_pins,
+	PathGroup *group = PathGroup::makePathGroupSlack(clk_name,
+							 group_path_count,
+							 endpoint_path_count,
+							 unique_pins,
 							 slack_min, slack_max,
 							 this);
 	clk_map_[mm_index][clk] = group;
@@ -281,7 +332,8 @@ PathGroups::makeGroups(int group_count,
   if (setup_hold
       && reportGroup(path_delay_group_name_, group_names))
     path_delay_[mm_index] = PathGroup::makePathGroupSlack(path_delay_group_name_,
-							  group_count, endpoint_count,
+							  group_path_count,
+							  endpoint_path_count,
 							  unique_pins,
 							  slack_min, slack_max,
 							  this);
@@ -291,7 +343,8 @@ PathGroups::makeGroups(int group_count,
   if (gated_clk
       && reportGroup(gated_clk_group_name_, group_names))
     gated_clk_[mm_index] = PathGroup::makePathGroupSlack(gated_clk_group_name_,
-							 group_count, endpoint_count,
+							 group_path_count,
+							 endpoint_path_count,
 							 unique_pins,
 							 slack_min, slack_max,
 							 this);
@@ -301,7 +354,8 @@ PathGroups::makeGroups(int group_count,
   if (async
       && reportGroup(async_group_name_, group_names))
     async_[mm_index] = PathGroup::makePathGroupSlack(async_group_name_,
-						     group_count, endpoint_count,
+						     group_path_count,
+						     endpoint_path_count,
 						     unique_pins,
 						     slack_min, slack_max,
 						     this);
@@ -312,8 +366,8 @@ PathGroups::makeGroups(int group_count,
       && reportGroup(unconstrained_group_name_, group_names))
     unconstrained_[mm_index] =
       PathGroup::makePathGroupArrival(unconstrained_group_name_,
-				      group_count, endpoint_count, unique_pins,
-				      min_max, this);
+				      group_path_count, endpoint_path_count,
+				      unique_pins, min_max, this);
   else
     unconstrained_[mm_index] = nullptr;
 }
@@ -358,9 +412,11 @@ PathGroups::pathGroup(const PathEnd *path_end) const
 {
   const MinMax *min_max = path_end->minMax(this);
   int mm_index =  min_max->index();
-  // GroupPaths have precedence.
   GroupPath *group_path = groupPathTo(path_end);
- if (group_path) {
+  if (path_end->isUnconstrained())
+    return unconstrained_[mm_index];
+  // GroupPaths have precedence.
+  else if (group_path) {
    if (group_path->isDefault())
      return path_delay_[mm_index];
    else {
@@ -393,8 +449,6 @@ PathGroups::pathGroup(const PathEnd *path_end) const
     else
       return path_delay_[mm_index];
   }
-  else if (path_end->isUnconstrained())
-    return unconstrained_[mm_index];
   else {
     report_->critical(1390, "unknown path end type");
     return nullptr;
@@ -485,15 +539,15 @@ PathGroups::makePathEnds(ExceptionTo *to,
 			 bool sort_by_slack)
 {
   Stats stats(debug_, report_);
-  makeGroupPathEnds(to, group_count_, endpoint_count_, unique_pins_,
+  makeGroupPathEnds(to, group_path_count_, endpoint_path_count_, unique_pins_,
 		    corner, min_max);
 
   PathEndSeq path_ends;
   pushGroupPathEnds(path_ends);
   if (sort_by_slack) {
     sort(path_ends, PathEndLess(this));
-    if (static_cast<int>(path_ends.size()) > group_count_)
-      path_ends.resize(group_count_);
+    if (static_cast<int>(path_ends.size()) > group_path_count_)
+      path_ends.resize(group_path_count_);
   }
 
   if (unconstrained_paths
@@ -551,7 +605,7 @@ void
 MakePathEnds1::visitPathEnd(PathEnd *path_end,
 			    PathGroup *group)
 {
-  if (group->savable(path_end)) {
+  if (group->saveable(path_end)) {
     // Only keep the path end with the smallest slack/latest arrival.
     PathEnd *worst_end = ends_.findKey(group);
     if (worst_end) {
@@ -574,7 +628,7 @@ MakePathEnds1::vertexEnd(Vertex *)
     PathGroup *group;
     PathEnd *end;
     group_iter.next(group, end);
-    // visitPathEnd already confirmed slack is savable.
+    // visitPathEnd already confirmed slack is saveable.
     if (end) {
       group->insert(end);
       // Clear ends_ for next vertex.
@@ -591,7 +645,7 @@ MakePathEnds1::vertexEnd(Vertex *)
 class MakePathEndsAll : public PathEndVisitor
 {
 public:
-  MakePathEndsAll(int endpoint_count,
+  MakePathEndsAll(int endpoint_path_count,
                   PathGroups *path_groups);
   MakePathEndsAll(const MakePathEndsAll&) = default;
   virtual ~MakePathEndsAll();
@@ -603,7 +657,7 @@ private:
   void visitPathEnd(PathEnd *path_end,
 		    PathGroup *group);
 
-  int endpoint_count_;
+  int endpoint_path_count_;
   PathGroups *path_groups_;
   const StaState *sta_;
   PathGroupEndsMap ends_;
@@ -611,9 +665,9 @@ private:
   PathEndNoCrprLess path_no_crpr_cmp_;
 };
 
-MakePathEndsAll::MakePathEndsAll(int endpoint_count,
+MakePathEndsAll::MakePathEndsAll(int endpoint_path_count,
 				 PathGroups *path_groups) :
-  endpoint_count_(endpoint_count),
+  endpoint_path_count_(endpoint_path_count),
   path_groups_(path_groups),
   sta_(path_groups),
   slack_cmp_(path_groups),
@@ -663,7 +717,6 @@ void
 MakePathEndsAll::vertexEnd(Vertex *)
 {
   Debug *debug = sta_->debug();
-  Network *network = sta_->network();
   PathGroupEndsMap::Iterator group_iter(ends_);
   while (group_iter.hasNext()) {
     PathGroup *group;
@@ -675,29 +728,30 @@ MakePathEndsAll::vertexEnd(Vertex *)
       PathEndSeq::Iterator end_iter(ends);
       int n = 0;
       while (end_iter.hasNext()
-	     && n < endpoint_count_) {
+	     && n < endpoint_path_count_) {
 	PathEnd *path_end = end_iter.next();
 	// Only save the worst path end for each crpr tag.
 	// PathEnum will peel the others.
 	if (!unique_ends.hasKey(path_end)) {
-	  debugPrint(debug, "path_enum", 5, "insert %s %s %s %d",
-                     path_end->vertex(sta_)->name(network),
+	  debugPrint(debug, "path_group", 2, "insert %s %s %s %d",
+                     path_end->vertex(sta_)->to_string(sta_).c_str(),
                      path_end->typeName(),
-                     path_end->transition(sta_)->asString(),
+                     path_end->transition(sta_)->to_string().c_str(),
                      path_end->path()->tag(sta_)->index());
 	  // Give the group a copy of the path end because
 	  // it may delete it during pruning.
-	  if (group->savable(path_end)) {
+	  if (group->saveable(path_end)
+              || group->enumMinSlackUnderMin(path_end)) {
 	    group->insert(path_end->copy());
 	    unique_ends.insert(path_end);
 	    n++;
 	  }
 	}
 	else
-	  debugPrint(debug, "path_enum", 5, "prune %s %s %s %d",
-                     path_end->vertex(sta_)->name(network),
+	  debugPrint(debug, "path_group", 3, "prune %s %s %s %d",
+                     path_end->vertex(sta_)->to_string(sta_).c_str(),
                      path_end->typeName(),
-                     path_end->transition(sta_)->asString(),
+                     path_end->transition(sta_)->to_string().c_str(),
                      path_end->path()->tag(sta_)->index());
       }
       // Clear ends for next vertex.
@@ -715,18 +769,18 @@ MakePathEndsAll::vertexEnd(Vertex *)
 
 void
 PathGroups::makeGroupPathEnds(ExceptionTo *to,
-			      int group_count,
-			      int endpoint_count,
+			      int group_path_count,
+			      int endpoint_path_count,
 			      bool unique_pins,
 			      const Corner *corner,
 			      const MinMaxAll *min_max)
 {
-  if (endpoint_count == 1) {
+  if (endpoint_path_count == 1) {
     MakePathEnds1 make_path_ends(this);
     makeGroupPathEnds(to, corner, min_max, &make_path_ends);
   }
   else {
-    MakePathEndsAll make_path_ends(endpoint_count, this);
+    MakePathEndsAll make_path_ends(endpoint_path_count, this);
     makeGroupPathEnds(to, corner, min_max, &make_path_ends);
 
     for (auto path_min_max : MinMax::range()) {
@@ -735,54 +789,59 @@ PathGroups::makeGroupPathEnds(ExceptionTo *to,
         const char *name = name_group.first;
         PathGroup *group = findPathGroup(name, path_min_max);
         if (group)
-          enumPathEnds(group, group_count, endpoint_count, unique_pins, true);
+          enumPathEnds(group, group_path_count, endpoint_path_count, unique_pins, true);
       }
 
       for (auto clk : sdc_->clks()) {
 	PathGroup *group = findPathGroup(clk, path_min_max);
 	if (group)
-	  enumPathEnds(group, group_count, endpoint_count, unique_pins, true);
+	  enumPathEnds(group, group_path_count, endpoint_path_count, unique_pins, true);
       }
 
       PathGroup *group = unconstrained_[mm_index];
       if (group)
-	enumPathEnds(group, group_count, endpoint_count, unique_pins, false);
+	enumPathEnds(group, group_path_count, endpoint_path_count, unique_pins, false);
       group = path_delay_[mm_index];
       if (group)
-	enumPathEnds(group, group_count, endpoint_count, unique_pins, true);
+	enumPathEnds(group, group_path_count, endpoint_path_count, unique_pins, true);
       group = gated_clk_[mm_index];
       if (group)
-	enumPathEnds(group, group_count, endpoint_count, unique_pins, true);
+	enumPathEnds(group, group_path_count, endpoint_path_count, unique_pins, true);
       group = async_[mm_index];
       if (group)
-	enumPathEnds(group, group_count, endpoint_count, unique_pins, true);
+	enumPathEnds(group, group_path_count, endpoint_path_count, unique_pins, true);
     }
   }
 }
 
 void
 PathGroups::enumPathEnds(PathGroup *group,
-			 int group_count,
-			 int endpoint_count,
+			 int group_path_count,
+			 int endpoint_path_count,
 			 bool unique_pins,
 			 bool cmp_slack)
 {
   // Insert the worst max_path path ends in the group into a path
   // enumerator.
-  PathEnum path_enum(group_count, endpoint_count, unique_pins, cmp_slack, this);
+  PathEnum path_enum(group_path_count, endpoint_path_count,
+		     unique_pins, cmp_slack, this);
   PathGroupIterator *end_iter = group->iterator();
   while (end_iter->hasNext()) {
     PathEnd *end = end_iter->next();
-    if (group->savable(end))
+    if (group->saveable(end)
+        || group->enumMinSlackUnderMin(end))
       path_enum.insert(end);
   }
   delete end_iter;
   group->clear();
 
-  // Parallel path enumeratation to find the endpoint_count/max path ends.
-  for (int n = 0; path_enum.hasNext() && n < group_count; n++) {
+  // Parallel path enumeratation to find the endpoint_path_count/max path ends.
+  for (int n = 0; path_enum.hasNext() && n < group_path_count; n++) {
     PathEnd *end = path_enum.next();
-    group->insert(end);
+    if (group->saveable(end))
+      group->insert(end);
+    else
+      delete end;
   }
 }
 
@@ -840,7 +899,7 @@ public:
   virtual void visit(Vertex *vertex);
 
 private:
-  VisitPathEnds *visit_path_ends_;
+  VisitPathEnds visit_path_ends_;
   PathEndVisitor *path_end_visitor_;
   const Corner *corner_;
   const MinMaxAll *min_max_;
@@ -851,7 +910,7 @@ MakeEndpointPathEnds::MakeEndpointPathEnds(PathEndVisitor *path_end_visitor,
 					   const Corner *corner,
 					   const MinMaxAll *min_max,
 					   const StaState *sta) :
-  visit_path_ends_(new VisitPathEnds(sta)),
+  visit_path_ends_(sta),
   path_end_visitor_(path_end_visitor->copy()),
   corner_(corner),
   min_max_(min_max),
@@ -860,7 +919,7 @@ MakeEndpointPathEnds::MakeEndpointPathEnds(PathEndVisitor *path_end_visitor,
 }
 
 MakeEndpointPathEnds::MakeEndpointPathEnds(const MakeEndpointPathEnds &make_path_ends) :
-  visit_path_ends_(new VisitPathEnds(make_path_ends.sta_)),
+  visit_path_ends_(make_path_ends.sta_),
   path_end_visitor_(make_path_ends.path_end_visitor_->copy()),
   corner_(make_path_ends.corner_),
   min_max_(make_path_ends.min_max_),
@@ -870,7 +929,6 @@ MakeEndpointPathEnds::MakeEndpointPathEnds(const MakeEndpointPathEnds &make_path
 
 MakeEndpointPathEnds::~MakeEndpointPathEnds()
 {
-  delete visit_path_ends_;
   delete path_end_visitor_;
 }
 
@@ -883,8 +941,7 @@ MakeEndpointPathEnds::copy() const
 void
 MakeEndpointPathEnds::visit(Vertex *vertex)
 {
-  visit_path_ends_->visitPathEnds(vertex, corner_, min_max_, true,
-				  path_end_visitor_);
+  visit_path_ends_.visitPathEnds(vertex, corner_, min_max_, true, path_end_visitor_);
 }
 
 ////////////////////////////////////////////////////////////////
@@ -904,7 +961,7 @@ PathGroups::makeGroupPathEnds(VertexSet *endpoints,
     Vector<MakeEndpointPathEnds> visitors(thread_count_,
                                           MakeEndpointPathEnds(visitor, corner,
                                                                min_max, this));
-    for (auto endpoint : *endpoints) {
+    for (const auto endpoint : *endpoints) {
       dispatch_queue_->dispatch( [endpoint, &visitors](int i)
       { visitors[i].visit(endpoint); } );
     }

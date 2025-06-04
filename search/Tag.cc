@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "Tag.hh"
 
@@ -81,34 +89,36 @@ Tag::~Tag()
     delete states_;
 }
 
-const char *
-Tag::asString(const StaState *sta) const
+std::string
+Tag::to_string(const StaState *sta) const
 {
-  return asString(true, true, sta);
+  return to_string(true, true, sta);
 }
 
-const char *
-Tag::asString(bool report_index,
-	      bool report_rf_min_max,
-	      const StaState *sta) const
+std::string
+Tag::to_string(bool report_index,
+               bool report_rf_min_max,
+               const StaState *sta) const
 {
   const Network *network = sta->network();
   const Corners *corners = sta->corners();
-  string result;
+  std::string result;
 
   if (report_index)
-    result += std::to_string(index_) + " ";
+    result += std::to_string(index_);
 
   if (report_rf_min_max) {
     const RiseFall *rf = transition();
     PathAnalysisPt *path_ap = corners->findPathAnalysisPt(path_ap_index_);
-    result += rf->asString();
     result += " ";
-    result += path_ap->pathMinMax()->asString();
+    result += rf->to_string().c_str();
+    result += " ";
+    result += path_ap->pathMinMax()->to_string();
     result += "/";
     result += std::to_string(path_ap_index_);
   }
 
+  result += " ";
   const ClockEdge *clk_edge = clkEdge();
   if (clk_edge)
     result += clk_edge->name();
@@ -138,10 +148,10 @@ Tag::asString(bool report_index,
     result += network->pathName(clk_src);
   }
 
-  const PathVertex crpr_clk_path(clk_info_->crprClkPath(), sta);
-  if (!crpr_clk_path.isNull()) {
+  const Path *crpr_clk_path = clk_info_->crprClkPath(sta);
+  if (crpr_clk_path != nullptr) {
     result += " crpr_pin ";
-    result += network->pathName(crpr_clk_path.pin(sta));
+    result += network->pathName(crpr_clk_path->pin(sta));
   }
 
   if (input_delay_) {
@@ -168,10 +178,7 @@ Tag::asString(bool report_index,
       }
     }
   }
-
-  char *tmp = makeTmpString(result.size() + 1);
-  strcpy(tmp, result.c_str());
-  return tmp;
+  return result;
 }
 
 const RiseFall *
@@ -270,40 +277,43 @@ Tag::findHash()
 }
 
 size_t
-Tag::matchHash(bool match_crpr_clk_pin) const
+Tag::matchHash(bool match_crpr_clk_pin,
+               const StaState *sta) const
 {
   if (match_crpr_clk_pin)
     // match_hash_ with crpr clk pin thrown in.
-    return hashSum(match_hash_, clk_info_->crprClkVertexId());
+    return hashSum(match_hash_, clk_info_->crprClkVertexId(sta));
   else
     return match_hash_;
 }
 
 ////////////////////////////////////////////////////////////////
 
+TagLess::TagLess(const StaState *sta) :
+  sta_(sta)
+{
+}
+
 bool
 TagLess::operator()(const Tag *tag1,
 		    const Tag *tag2) const
 {
-  return tagCmp(tag1, tag2, true) < 0;
+  return tagCmp(tag1, tag2, sta_) < 0;
 }
 
 int
 tagCmp(const Tag *tag1,
        const Tag *tag2,
-       bool cmp_rf)
+       const StaState *sta)
 {
   if (tag1 == tag2)
     return 0;
 
-  if (cmp_rf) {
-    int rf_index1 = tag1->rfIndex();
-    int rf_index2 = tag2->rfIndex();
-    if (rf_index1 < rf_index2)
-      return -1;
-    if (rf_index1 > rf_index2)
-      return 1;
-  }
+  ClkInfo *clk_info1 = tag1->clkInfo();
+  ClkInfo *clk_info2 = tag2->clkInfo();
+  int clk_cmp = clkInfoCmp(clk_info1, clk_info2, sta);
+  if (clk_cmp != 0)
+    return clk_cmp;
 
   PathAPIndex path_ap_index1 = tag1->pathAPIndex();
   PathAPIndex path_ap_index2 = tag2->pathAPIndex();
@@ -312,11 +322,11 @@ tagCmp(const Tag *tag1,
   if (path_ap_index1 > path_ap_index2)
     return 1;
 
-  size_t clk_info1 = tag1->clkInfo()->hash();
-  size_t clk_info2 = tag2->clkInfo()->hash();
-  if (clk_info1 < clk_info2)
+  int rf_index1 = tag1->rfIndex();
+  int rf_index2 = tag2->rfIndex();
+  if (rf_index1 < rf_index2)
     return -1;
-  if (clk_info1 > clk_info2)
+  if (rf_index1 > rf_index2)
     return 1;
 
   bool is_clk1 = tag1->isClock();
@@ -410,8 +420,8 @@ tagMatch(const Tag *tag1,
 	&& tag1->isSegmentStart() == tag2->isSegmentStart()
 	&& clk_info1->isGenClkSrcPath() == clk_info2->isGenClkSrcPath()
 	&& (!match_crpr_clk_pin
-	    || !sta->sdc()->crprActive()
-	    || clk_info1->crprClkVertexId() == clk_info2->crprClkVertexId())
+	    || !sta->crprActive()
+	    || clk_info1->crprClkVertexId(sta) == clk_info2->crprClkVertexId(sta))
 	&& tagStateEqual(tag1, tag2));
 }
 
@@ -471,9 +481,9 @@ tagMatchCmp(const Tag *tag1,
     return 1;
 
   if (match_crpr_clk_pin
-      && sta->sdc()->crprActive()) {
-    VertexId crpr_vertex1 = clk_info1->crprClkVertexId();
-    VertexId crpr_vertex2 = clk_info2->crprClkVertexId();
+      && sta->crprActive()) {
+    VertexId crpr_vertex1 = clk_info1->crprClkVertexId(sta);
+    VertexId crpr_vertex2 = clk_info2->crprClkVertexId(sta);
     if (crpr_vertex1 < crpr_vertex2)
       return -1;
     if (crpr_vertex1 > crpr_vertex2)
@@ -605,7 +615,7 @@ tagStateEqual(ExceptionStateSet *states1,
     return false;
 }
 
-// Match false, loop exception states only for crpr min/max paths.
+// Match loop exception states only for crpr min/max paths.
 static bool
 tagStateEqualCrpr(const Tag *tag1,
 		  const Tag *tag2)
@@ -620,8 +630,7 @@ tagStateEqualCrpr(const Tag *tag1,
     while (state_iter1.hasNext()) {
       state1 = state_iter1.next();
       ExceptionPath *exception1 = state1->exception();
-      if (exception1->isFalse()
-	  || exception1->isLoop())
+      if (exception1->isLoop())
 	break;
       else
 	state1 = nullptr;
@@ -630,8 +639,7 @@ tagStateEqualCrpr(const Tag *tag1,
     while (state_iter2.hasNext()) {
       state2 = state_iter2.next();
       ExceptionPath *exception2 = state2->exception();
-      if (exception2->isFalse()
-	  || exception2->isLoop())
+      if (exception2->isLoop())
 	break;
       else
 	state2 = nullptr;
@@ -668,7 +676,7 @@ TagMatchHash::TagMatchHash(bool match_crpr_clk_pin,
 size_t
 TagMatchHash::operator()(const Tag *tag) const
 {
-  return tag->matchHash(match_crpr_clk_pin_);
+  return tag->matchHash(match_crpr_clk_pin_, sta_);
 }
 
 TagMatchEqual::TagMatchEqual(bool match_crpr_clk_pin,

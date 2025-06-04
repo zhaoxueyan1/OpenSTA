@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -21,18 +29,20 @@
 
 namespace sta {
 
-using std::vector;
+typedef std::map<const Pin*, FloatSeq, PinIdLess> WatchPinValuesMap;
 
 ArcDelayCalc *
 makeCcsCeffDelayCalc(StaState *sta);
 
-class CcsCeffDelayCalc : public LumpedCapDelayCalc, public ArcDcalcWaveforms
+class CcsCeffDelayCalc : public LumpedCapDelayCalc,
+                         public ArcDcalcWaveforms
 {
 public:
   CcsCeffDelayCalc(StaState *sta);
   virtual ~CcsCeffDelayCalc();
   ArcDelayCalc *copy() override;
-
+  const char *name() const override { return "ccs_ceff"; }
+  bool reduceSupported() const override { return true; }
   ArcDcalcResult gateDelay(const Pin *drvr_pin,
                            const TimingArc *arc,
                            const Slew &in_slew,
@@ -40,38 +50,23 @@ public:
                            const Parasitic *parasitic,
                            const LoadPinIndexMap &load_pin_index_map,
                            const DcalcAnalysisPt *dcalc_ap) override;
-  string reportGateDelay(const Pin *drvr_pin,
-                         const TimingArc *arc,
-                         const Slew &in_slew,
-                         float load_cap,
-                         const Parasitic *parasitic,
-                         const LoadPinIndexMap &load_pin_index_map,
-                         const DcalcAnalysisPt *dcalc_ap,
-                         int digits) override;
+  std::string reportGateDelay(const Pin *drvr_pin,
+                              const TimingArc *arc,
+                              const Slew &in_slew,
+                              float load_cap,
+                              const Parasitic *parasitic,
+                              const LoadPinIndexMap &load_pin_index_map,
+                              const DcalcAnalysisPt *dcalc_ap,
+                              int digits) override;
 
-  Table1 drvrWaveform(const Pin *in_pin,
-                      const RiseFall *in_rf,
-                      const Pin *drvr_pin,
-                      const RiseFall *drvr_rf,
-                      const Corner *corner,
-                      const MinMax *min_max) override;
-  Table1 loadWaveform(const Pin *in_pin,
-                      const RiseFall *in_rf,
-                      const Pin *drvr_pin,
-                      const RiseFall *drvr_rf,
-                      const Pin *load_pin,
-                      const Corner *corner,
-                      const MinMax *min_max) override;
-  Table1 drvrRampWaveform(const Pin *in_pin,
-                          const RiseFall *in_rf,
-                          const Pin *drvr_pin,
-                          const RiseFall *drvr_rf,
-                          const Pin *load_pin,
-                          const Corner *corner,
-                          const MinMax *min_max) override;
+  // Record waveform for drvr/load pin.
+  void watchPin(const Pin *pin) override;
+  void clearWatchPins() override;
+  PinSeq watchPins() const override;
+  Waveform watchWaveform(const Pin *pin) override;
 
 protected:
-  typedef vector<double> Region;
+  typedef std::vector<double> Region;
 
   void gateDelaySlew(const LibertyLibrary *drvr_library,
                      const RiseFall *rf,
@@ -99,14 +94,23 @@ protected:
                      // Return values.
                      ArcDelay &delay,
                      Slew &slew);
+  double findVlTime(double v,
+                    double elmore);
   bool makeWaveformPreamble(const Pin *in_pin,
                             const RiseFall *in_rf,
                             const Pin *drvr_pin,
                             const RiseFall *drvr_rf,
                             const Corner *corner,
                             const MinMax *min_max);
-  double findVlTime(double v,
-                    double elmore);
+  Waveform drvrWaveform();
+  Waveform loadWaveform(const Pin *load_pin);
+  Waveform drvrRampWaveform(const Pin *in_pin,
+                            const RiseFall *in_rf,
+                            const Pin *drvr_pin,
+                            const RiseFall *drvr_rf,
+                            const Pin *load_pin,
+                            const Corner *corner,
+                            const MinMax *min_max);
   void vl(double t,
           double elmore,
           // Return values.
@@ -114,11 +118,10 @@ protected:
           double &dvl_dt);
   double vl(double t,
            double elmore);
-  Table1 drvrWaveform(const Slew &in_slew,
-                      const RiseFall *drvr_rf);
   void fail(const char *reason);
 
   const Pin *drvr_pin_;
+  const RiseFall *drvr_rf_;
   double in_slew_;
   double load_cap_;
   const Parasitic *parasitic_;
@@ -148,6 +151,8 @@ protected:
   Region region_ramp_times_;
   Region region_ramp_slopes_;
   bool vl_fail_;
+  // Waveform recording.
+  WatchPinValuesMap watch_pin_values_;
 
   const Unit *capacitance_unit_;
   // Delay calculator to use when ccs waveforms are missing from liberty.

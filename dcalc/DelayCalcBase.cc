@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "DelayCalcBase.hh"
 
@@ -22,12 +30,16 @@
 #include "TableModel.hh"
 #include "Network.hh"
 #include "Parasitics.hh"
+#include "Graph.hh"
 #include "Sdc.hh"
 #include "Corner.hh"
 #include "DcalcAnalysisPt.hh"
+#include "GraphDelayCalc.hh"
+#include "Variables.hh"
 
 namespace sta {
 
+using std::string;
 using std::log;
 
 DelayCalcBase::DelayCalcBase(StaState *sta) :
@@ -45,7 +57,7 @@ DelayCalcBase::reduceParasitic(const Parasitic *parasitic_network,
   while (pin_iter->hasNext()) {
     const Pin *pin = pin_iter->next();
     if (network_->isDriver(pin)) {
-      for (RiseFall *rf : RiseFall::range()) {
+      for (const RiseFall *rf : RiseFall::range()) {
         for (const MinMax *min_max : min_max->range()) {
           if (corner == nullptr) {
             for (const Corner *corner1 : *corners_) {
@@ -62,36 +74,6 @@ DelayCalcBase::reduceParasitic(const Parasitic *parasitic_network,
     }
   }
   delete pin_iter;
-}
-
-TimingModel *
-DelayCalcBase::model(const TimingArc *arc,
-                     const DcalcAnalysisPt *dcalc_ap) const
-{
-  const OperatingConditions *op_cond = dcalc_ap->operatingConditions();
-  const TimingArc *corner_arc = arc->cornerArc(dcalc_ap->libertyIndex());
-  return corner_arc->model(op_cond);
-}
-
-GateTimingModel *
-DelayCalcBase::gateModel(const TimingArc *arc,
-                         const DcalcAnalysisPt *dcalc_ap) const
-{
-  return dynamic_cast<GateTimingModel*>(model(arc, dcalc_ap));
-}
-
-GateTableModel *
-DelayCalcBase::gateTableModel(const TimingArc *arc,
-                              const DcalcAnalysisPt *dcalc_ap) const
-{
-  return dynamic_cast<GateTableModel*>(model(arc, dcalc_ap));
-}
-
-CheckTimingModel *
-DelayCalcBase::checkModel(const TimingArc *arc,
-                          const DcalcAnalysisPt *dcalc_ap) const
-{
-  return dynamic_cast<CheckTimingModel*>(model(arc, dcalc_ap));
 }
 
 void
@@ -114,10 +96,16 @@ DelayCalcBase::dspfWireDelaySlew(const Pin *load_pin,
 {
   
   LibertyLibrary *load_library = thresholdLibrary(load_pin);
-  float vth = load_library->inputThreshold(rf);
-  float vl = load_library->slewLowerThreshold(rf);
-  float vh = load_library->slewUpperThreshold(rf);
-  float slew_derate = load_library->slewDerateFromLibrary();
+  float vth = 0.5;
+  float vl = 0.2;
+  float vh = 0.8;
+  float slew_derate = 1.0;
+  if (load_library) {
+    vth = load_library->inputThreshold(rf);
+    vl = load_library->slewLowerThreshold(rf);
+    vh = load_library->slewUpperThreshold(rf);
+    slew_derate = load_library->slewDerateFromLibrary();
+  }
   wire_delay = -elmore * log(1.0 - vth);
   load_slew = drvr_slew + elmore * log((1.0 - vl) / (1.0 - vh)) / slew_derate;
   load_slew = drvr_slew + elmore * log((1.0 - vl) / (1.0 - vh)) / slew_derate;
@@ -176,12 +164,13 @@ DelayCalcBase::checkDelay(const Pin *check_pin,
                           float related_out_cap,
                           const DcalcAnalysisPt *dcalc_ap)
 {
-  CheckTimingModel *model = checkModel(arc, dcalc_ap);
+  CheckTimingModel *model = arc->checkModel(dcalc_ap);
   if (model) {
     float from_slew1 = delayAsFloat(from_slew);
     float to_slew1 = delayAsFloat(to_slew);
     return model->checkDelay(pinPvt(check_pin, dcalc_ap), from_slew1, to_slew1,
-                             related_out_cap, pocv_enabled_);
+                             related_out_cap,
+                             variables_->pocvEnabled());
   }
   else
     return delay_zero;
@@ -197,7 +186,7 @@ DelayCalcBase::reportCheckDelay(const Pin *check_pin,
                                 const DcalcAnalysisPt *dcalc_ap,
                                 int digits)
 {
-  CheckTimingModel *model = checkModel(arc, dcalc_ap);
+  CheckTimingModel *model = arc->checkModel(dcalc_ap);
   if (model) {
     float from_slew1 = delayAsFloat(from_slew);
     float to_slew1 = delayAsFloat(to_slew);
@@ -217,6 +206,35 @@ DelayCalcBase::pinPvt(const Pin *pin,
   if (pvt == nullptr)
     pvt = dcalc_ap->operatingConditions();
   return pvt;
+}
+
+void
+DelayCalcBase::setDcalcArgParasiticSlew(ArcDcalcArg &gate,
+                                        const DcalcAnalysisPt *dcalc_ap)
+{
+  const Pin *drvr_pin = gate.drvrPin();
+  if (drvr_pin) {
+    const Parasitic *parasitic;
+    float load_cap;
+    graph_delay_calc_->parasiticLoad(drvr_pin, gate.drvrEdge(), dcalc_ap,
+                                     nullptr, this, load_cap,
+                                     parasitic);
+    gate.setLoadCap(load_cap);
+    gate.setParasitic(parasitic);
+    const Pin *in_pin = gate.inPin();
+    const Vertex *in_vertex = graph_->pinLoadVertex(in_pin);
+    const Slew &in_slew = graph_delay_calc_->edgeFromSlew(in_vertex, gate.inEdge(),
+                                                          gate.edge(), dcalc_ap);
+    gate.setInSlew(in_slew);
+  }
+}
+
+void
+DelayCalcBase::setDcalcArgParasiticSlew(ArcDcalcArgSeq &gates,
+                                        const DcalcAnalysisPt *dcalc_ap)
+{
+  for (ArcDcalcArg &gate : gates)
+    setDcalcArgParasiticSlew(gate, dcalc_ap);
 }
 
 } // namespace

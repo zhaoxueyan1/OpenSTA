@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #include "ConcreteLibrary.hh"
 
@@ -26,6 +34,7 @@
 
 namespace sta {
 
+using std::string;
 using std::map;
 using std::min;
 using std::max;
@@ -37,9 +46,9 @@ static constexpr char escape_ = '\\';
 ConcreteLibrary::ConcreteLibrary(const char *name,
 				 const char *filename,
 				 bool is_liberty) :
-  name_(stringCopy(name)),
+  name_(name),
   id_(ConcreteNetwork::nextObjectId()),
-  filename_(stringCopy(filename)),
+  filename_(filename ? filename : ""),
   is_liberty_(is_liberty),
   bus_brkt_left_('['),
   bus_brkt_right_(']')
@@ -48,8 +57,6 @@ ConcreteLibrary::ConcreteLibrary(const char *name,
 
 ConcreteLibrary::~ConcreteLibrary()
 {
-  stringDelete(name_);
-  stringDelete(filename_);
   cell_map_.deleteContents();
 }
 
@@ -123,9 +130,9 @@ ConcreteCell::ConcreteCell(const char *name,
 			   const char *filename,
 			   bool is_leaf,
                            ConcreteLibrary *library) :
-  name_(stringCopy(name)),
+  name_(name),
   id_(ConcreteNetwork::nextObjectId()),
-  filename_(stringCopy(filename)),
+  filename_(filename ? filename : ""),
   library_(library),
   liberty_cell_(nullptr),
   ext_cell_(nullptr),
@@ -136,19 +143,14 @@ ConcreteCell::ConcreteCell(const char *name,
 
 ConcreteCell::~ConcreteCell()
 {
-  stringDelete(name_);
-  if (filename_)
-    stringDelete(filename_);
   ports_.deleteContents();
 }
 
 void
 ConcreteCell::setName(const char *name)
 {
-  const char *name_cpy = stringCopy(name);
-  library_->renameCell(this, name_cpy);
-  stringDelete(name_);
-  name_ = name_cpy;
+  library_->renameCell(this, name);
+  name_ = name;
 }
 
 void
@@ -272,15 +274,15 @@ void
 ConcreteCell::setAttribute(const string &key,
                            const string &value)
 {
-  attribute_map_.insert(key, value);
+  attribute_map_[key] = value;
 }
 
 string
 ConcreteCell::getAttribute(const string &key) const 
 {
-  if (attribute_map_.hasKey(key)) {
-    return attribute_map_.findKey(key);
-  }
+  const auto &itr = attribute_map_.find(key);
+  if (itr != attribute_map_.end())
+    return itr->second;
   return "";
 }
 
@@ -320,8 +322,9 @@ public:
   int from() const { return from_; }
   int to() const { return to_; }
   ConcretePortSeq &members() { return members_; }
+  const ConcretePortSeq &members() const { return members_; }
   void setDirection(PortDirection *direction);
-  PortDirection *direction() { return direction_; }
+  PortDirection *direction() const { return direction_; }
 
 private:
   int from_;
@@ -385,9 +388,7 @@ ConcreteCell::groupBusPorts(const char bus_brkt_left,
   }
 
   // Make the bus ports.
-  for (auto name_bus : bus_map) {
-    string bus_name = name_bus.first;
-    BusPort &bus_port = name_bus.second;
+  for (const auto& [bus_name, bus_port] : bus_map) {
     int from = bus_port.from();
     int to = bus_port.to();
     size_t size = to - from + 1;
@@ -415,7 +416,7 @@ ConcretePort::ConcretePort(const char *name,
 			   bool is_bundle,
 			   ConcretePortSeq *member_ports,
                            ConcreteCell *cell) :
-  name_(stringCopy(name)),
+  name_(name),
   id_(ConcreteNetwork::nextObjectId()),
   cell_(cell),
   direction_(PortDirection::unknown()),
@@ -437,7 +438,6 @@ ConcretePort::~ConcretePort()
   if (is_bus_)
     member_ports_->deleteContents();
   delete member_ports_;
-  stringDelete(name_);
 }
 
 Cell *
@@ -464,14 +464,14 @@ ConcretePort::busName() const
   if (is_bus_) {
     ConcreteLibrary *lib = cell_->library();
     return stringPrintTmp("%s%c%d:%d%c",
-			  name_,
+			  name(),
 			  lib->busBrktLeft(),
 			  from_index_,
 			  to_index_,
 			  lib->busBrktRight());
   }
   else
-    return name_;
+    return name();
 }
 
 ConcretePort *

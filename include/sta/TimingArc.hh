@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -27,6 +35,8 @@ namespace sta {
 
 class TimingArcAttrs;
 class WireTimingArc;
+class GateTableModel;
+class DcalcAnalysisPt;
 
 typedef int TimingArcIndex;
 typedef Vector<TimingArc*> TimingArcSeq;
@@ -73,7 +83,7 @@ enum class TimingType {
 };
 
 const char *
-timingTypeString(TimingType type);
+to_string(TimingType type);
 TimingType
 findTimingType(const char *string);
 bool
@@ -136,7 +146,7 @@ public:
 	       LibertyPort *from,
 	       LibertyPort *to,
 	       LibertyPort *related_out,
-	       TimingRole *role,
+	       const TimingRole *role,
 	       TimingArcAttrsPtr attrs);
   virtual ~TimingArcSet();
   LibertyCell *libertyCell() const;
@@ -144,10 +154,10 @@ public:
   LibertyPort *to() const { return to_; }
   bool isWire() const;
   LibertyPort *relatedOut() const { return related_out_; }
-  TimingRole *role() const { return role_; };
+  const TimingRole *role() const { return role_; };
   TimingSense sense() const;
   // Rise/fall if the arc set is rising_edge or falling_edge.
-  RiseFall *isRisingFallingEdge() const;
+  const RiseFall *isRisingFallingEdge() const;
   size_t arcCount() const { return arcs_.size(); }
   TimingArcSeq &arcs() { return arcs_; }
   // Return 1 or 2 arcs matching from transition.
@@ -160,7 +170,7 @@ public:
   TimingArcIndex addTimingArc(TimingArc *arc);
   void deleteTimingArc(TimingArc *arc);
   TimingArc *findTimingArc(unsigned arc_index);
-  void setRole(TimingRole *role);
+  void setRole(const TimingRole *role);
   FuncExpr *cond() const { return attrs_->cond(); }
   // Cond default is the timing arcs with no condition when there are
   // other conditional timing arcs between the same pins.
@@ -195,13 +205,13 @@ public:
   static int wireArcCount() { return 2; }
 
 protected:
-  TimingArcSet(TimingRole *role,
+  TimingArcSet(const TimingRole *role,
                TimingArcAttrsPtr attrs);
 
   LibertyPort *from_;
   LibertyPort *to_;
   LibertyPort *related_out_;
-  TimingRole *role_;
+  const TimingRole *role_;
   // TimingArcAttrs are shared by TimingArcSets in a bus with timing groups. 
   TimingArcAttrsPtr attrs_;
   TimingArcSeq arcs_;
@@ -222,21 +232,25 @@ class TimingArc
 {
 public:
   TimingArc(TimingArcSet *set,
-	    Transition *from_rf,
-	    Transition *to_rf,
+	    const Transition *from_rf,
+	    const Transition *to_rf,
 	    TimingModel *model);
   ~TimingArc();
+  std::string to_string() const;
   LibertyPort *from() const { return set_->from(); }
   LibertyPort *to() const { return set_->to(); }
-  Transition *fromEdge() const { return from_rf_; }
-  Transition *toEdge() const { return to_rf_; }
-  TimingRole *role() const { return set_->role(); }
+  const Transition *fromEdge() const { return from_rf_; }
+  const Transition *toEdge() const { return to_rf_; }
+  const TimingRole *role() const { return set_->role(); }
   TimingArcSet *set() const { return set_; }
   TimingSense sense() const;
   // Index in TimingArcSet.
   unsigned index() const { return index_; }
-  TimingModel *model(const OperatingConditions *op_cond) const;
   TimingModel *model() const { return model_; }
+  GateTimingModel *gateModel(const DcalcAnalysisPt *dcalc_ap) const;
+  CheckTimingModel *checkModel(const DcalcAnalysisPt *dcalc_ap) const;
+  GateTableModel *gateTableModel() const;
+  GateTableModel *gateTableModel(const DcalcAnalysisPt *dcalc_ap) const;
   const TimingArc *cornerArc(int ap_index) const;
   void setCornerArc(TimingArc *corner_arc,
 		    int ap_index);
@@ -247,13 +261,14 @@ public:
 		    const TimingArc *arc2);
 
 protected:
+  TimingModel *model(const DcalcAnalysisPt *dcalc_ap) const;
   void setIndex(unsigned index);
   void addScaledModel(const OperatingConditions *op_cond,
 		      TimingModel *scaled_model);
 
   TimingArcSet *set_;
-  Transition *from_rf_;
-  Transition *to_rf_;
+  const Transition *from_rf_;
+  const Transition *to_rf_;
   unsigned index_;
   TimingModel *model_;
   ScaledTimingModelMap *scaled_models_;

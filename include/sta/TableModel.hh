@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -27,8 +35,6 @@
 
 namespace sta {
 
-using std::string;
-
 class Unit;
 class Units;
 class Report;
@@ -39,6 +45,7 @@ class Table1;
 typedef Vector<float> FloatSeq;
 typedef Vector<FloatSeq*> FloatTable;
 typedef Vector<Table1*> Table1Seq;
+typedef Table1 Waveform;
 
 TableAxisVariable
 stringTableAxisVariable(const char *variable);
@@ -66,6 +73,7 @@ public:
                  // Return values.
                  ArcDelay &gate_delay,
                  Slew &drvr_slew) const override;
+  // deprecated 2024-01-07
   // related_out_cap arg removed.
   void gateDelay(const Pvt *pvt,
                  float in_slew,
@@ -74,11 +82,11 @@ public:
                  bool pocv_enabled,
                  ArcDelay &gate_delay,
                  Slew &drvr_slew) const __attribute__ ((deprecated));
-  string reportGateDelay(const Pvt *pvt,
-                         float in_slew,
-                         float load_cap,
-                         bool pocv_enabled,
-                         int digits) const override;
+  std::string reportGateDelay(const Pvt *pvt,
+                              float in_slew,
+                              float load_cap,
+                              bool pocv_enabled,
+                              int digits) const override;
   float driveResistance(const Pvt *pvt) const override;
 
   const TableModel *delayModel() const { return delay_model_; }
@@ -104,13 +112,13 @@ protected:
 		  float in_slew,
 		  float load_cap,
 		  float related_out_cap) const;
-  string reportTableLookup(const char *result_name,
-                           const Pvt *pvt,
-                           const TableModel *model,
-                           float in_slew,
-                           float load_cap,
-                           float related_out_cap,
-                           int digits) const;
+  std::string reportTableLookup(const char *result_name,
+                                const Pvt *pvt,
+                                const TableModel *model,
+                                float in_slew,
+                                float load_cap,
+                                float related_out_cap,
+                                int digits) const;
   void findAxisValues(const TableModel *model,
 		      float in_slew,
 		      float load_cap,
@@ -141,13 +149,13 @@ public:
                       float to_slew,
                       float related_out_cap,
                       bool pocv_enabled) const override;
-  string reportCheckDelay(const Pvt *pvt,
-                          float from_slew,
-                          const char *from_slew_annotation,
-                          float to_slew,
-                          float related_out_cap,
-                          bool pocv_enabled,
-                          int digits) const override;
+  std::string reportCheckDelay(const Pvt *pvt,
+                               float from_slew,
+                               const char *from_slew_annotation,
+                               float to_slew,
+                               float related_out_cap,
+                               bool pocv_enabled,
+                               int digits) const override;
   const TableModel *model() const { return model_; }
 
   // Check the axes before making the model.
@@ -172,14 +180,14 @@ protected:
 		  float load_cap,
 		  float in_slew,
 		  float related_out_cap) const;
-  string reportTableDelay(const char *result_name,
-                          const Pvt *pvt,
-                          const TableModel *model,
-                          float from_slew,
-                          const char *from_slew_annotation,
-                          float to_slew,
-                          float related_out_cap,
-                          int digits) const;
+  std::string reportTableDelay(const char *result_name,
+                               const Pvt *pvt,
+                               const TableModel *model,
+                               float from_slew,
+                               const char *from_slew_annotation,
+                               float to_slew,
+                               float related_out_cap,
+                               int digits) const;
   static bool checkAxis(const TableAxis *axis);
 
   TableModel *model_;
@@ -214,24 +222,24 @@ public:
 		  float value1,
 		  float value2,
 		  float value3) const;
-  string reportValue(const char *result_name,
-                     const LibertyCell *cell,
-                     const Pvt *pvt,
-                     float value1,
-                     const char *comment1,
-                     float value2,
-                     float value3,
-                     const Unit *table_unit,
-                     int digits) const;
-  string report(const Units *units,
-                Report *report) const;
+  std::string reportValue(const char *result_name,
+                          const LibertyCell *cell,
+                          const Pvt *pvt,
+                          float value1,
+                          const char *comment1,
+                          float value2,
+                          float value3,
+                          const Unit *table_unit,
+                          int digits) const;
+  std::string report(const Units *units,
+                     Report *report) const;
 
 protected:
   float scaleFactor(const LibertyCell *cell,
 		    const Pvt *pvt) const;
-  string reportPvtScaleFactor(const LibertyCell *cell,
-                              const Pvt *pvt,
-                              int digits) const;
+  std::string reportPvtScaleFactor(const LibertyCell *cell,
+                                   const Pvt *pvt,
+                                   int digits) const;
 
   TablePtr table_;
   TableTemplate *tbl_template_;
@@ -267,15 +275,15 @@ public:
 		  float axis_value1,
 		  float axis_value2,
 		  float axis_value3) const;
-  virtual string reportValue(const char *result_name,
-                             const LibertyCell *cell,
-                             const Pvt *pvt,
-                             float value1,
-                             const char *comment1,
-                             float value2,
-                             float value3,
-                             const Unit *table_unit,
-                             int digits) const = 0;
+  virtual std::string reportValue(const char *result_name,
+                                  const LibertyCell *cell,
+                                  const Pvt *pvt,
+                                  float value1,
+                                  const char *comment1,
+                                  float value2,
+                                  float value3,
+                                  const Unit *table_unit,
+                                  int digits) const = 0;
   virtual void report(const Units *units,
 		      Report *report) const = 0;
 };
@@ -292,15 +300,15 @@ public:
   float findValue(float axis_value1,
                   float axis_value2,
                   float axis_value3) const override;
-  string reportValue(const char *result_name,
-                     const LibertyCell *cell,
-                     const Pvt *pvt,
-                     float value1,
-                     const char *comment1,
-                     float value2,
-                     float value3,
-                     const Unit *table_unit,
-                     int digits) const override;
+  std::string reportValue(const char *result_name,
+                          const LibertyCell *cell,
+                          const Pvt *pvt,
+                          float value1,
+                          const char *comment1,
+                          float value2,
+                          float value3,
+                          const Unit *table_unit,
+                          int digits) const override;
   void report(const Units *units,
               Report *report) const override;
   using Table::findValue;
@@ -329,15 +337,15 @@ public:
   float findValue(float value1,
                   float value2,
                   float value3) const override;
-  string reportValue(const char *result_name,
-                     const LibertyCell *cell,
-                     const Pvt *pvt,
-                     float value1,
-                     const char *comment1,
-                     float value2,
-                     float value3,
-                     const Unit *table_unit,
-                     int digits) const override;
+  std::string reportValue(const char *result_name,
+                          const LibertyCell *cell,
+                          const Pvt *pvt,
+                          float value1,
+                          const char *comment1,
+                          float value2,
+                          float value3,
+                          const Unit *table_unit,
+                          int digits) const override;
   void report(const Units *units,
               Report *report) const override;
 
@@ -374,15 +382,15 @@ public:
   float findValue(float value1,
                   float value2,
                   float value3) const override;
-  string reportValue(const char *result_name,
-                     const LibertyCell *cell,
-                     const Pvt *pvt,
-                     float value1,
-                     const char *comment1,
-                     float value2,
-                     float value3,
-                     const Unit *table_unit,
-                     int digits) const override;
+  std::string reportValue(const char *result_name,
+                          const LibertyCell *cell,
+                          const Pvt *pvt,
+                          float value1,
+                          const char *comment1,
+                          float value2,
+                          float value3,
+                          const Unit *table_unit,
+                          int digits) const override;
   void report(const Units *units,
               Report *report) const override;
 
@@ -420,15 +428,15 @@ public:
   float findValue(float value1,
                   float value2,
                   float value3) const override;
-  string reportValue(const char *result_name,
-                     const LibertyCell *cell,
-                     const Pvt *pvt,
-                     float value1,
-                     const char *comment1,
-                     float value2,
-                     float value3,
-                     const Unit *table_unit,
-                     int digits) const override;
+  std::string reportValue(const char *result_name,
+                          const LibertyCell *cell,
+                          const Pvt *pvt,
+                          float value1,
+                          const char *comment1,
+                          float value2,
+                          float value3,
+                          const Unit *table_unit,
+                          int digits) const override;
   void report(const Units *units,
               Report *report) const override;
   using Table::findValue;
@@ -455,9 +463,10 @@ public:
                      // Return values.
                      size_t &index,
                      bool &exists) const;
+  size_t findAxisClosestIndex(float value) const;
   FloatSeq *values() const { return values_; }
-  float min() const { return (*values_)[0]; }
-  float max() const { return (*values_)[values_->size() - 1]; }
+  float min() const;
+  float max() const;
 
 private:
   TableAxisVariable variable_;
@@ -472,7 +481,7 @@ public:
   ~ReceiverModel();
   void setCapacitanceModel(TableModel *table_model,
                            size_t segment,
-                           RiseFall *rf);
+                           const RiseFall *rf);
   static bool checkAxes(TablePtr table);
 
 private:
@@ -492,25 +501,42 @@ public:
   const RiseFall *rf() const { return rf_; }
   const TableAxis *slewAxis() const { return slew_axis_.get(); }
   const TableAxis *capAxis() const { return cap_axis_.get(); }
-  Table1 voltageWaveform(float in_slew,
-                         float load_cap);
-  float voltageTime(float in_slew,
-                    float load_cap,
-                    float voltage);
-  const Table1 *currentWaveform(float slew,
-                                float cap);
+  // Make voltage wavefroms from liberty time/current values.
+  // Required before voltageTime, timeVoltage, voltageCurrent.
+  void ensureVoltageWaveforms(float vdd);
   float timeCurrent(float slew,
                     float cap,
                     float time);
   float timeVoltage(float slew,
                     float cap,
                     float time);
+  float voltageTime(float in_slew,
+                    float load_cap,
+                    float voltage);
   float voltageCurrent(float slew,
                        float cap,
                        float volt);
   float referenceTime(float slew);
-  void makeVoltageWaveforms(float vdd);
+  float beginTime(float slew,
+                  float cap);
+  float endTime(float slew,
+                float cap);
   static bool checkAxes(const TableTemplate *tbl_template);
+
+  Table1 currentWaveform(float slew,
+                         float cap);
+  // Waveform closest to slew/cap; no interpolation.
+  const Table1 *currentWaveformRaw(float slew,
+                                   float cap);
+  Table1 voltageWaveform(float in_slew,
+                         float load_cap);
+  // Waveform closest to slew/cap; no interpolation.
+  const Table1 *voltageWaveformRaw(float slew,
+                                   float cap);
+  Table1 voltageCurrentWaveform(float slew,
+                                float cap);
+  // V/I for last segment of min slew/max cap.
+  float finalResistance();
 
 private:
   void findVoltages(size_t wave_index,
@@ -519,40 +545,42 @@ private:
                       float cap,
                       float axis_value,
                       Table1Seq &waveforms);
-  float voltageTime1(float voltage,
+  float beginEndTime(float slew,
+                     float cap,
+                     bool begin);
+  double voltageTime1(double volt,
+                      double dx1,
+                      double dx2,
+                      size_t wave_index00,
+                      size_t wave_index01,
+                      size_t wave_index10,
+                      size_t wave_index11);
+  float voltageTime2(float volt,
                      size_t wave_index);
-  void waveformMinMaxTime(float slew,
-                          float cap,
-                          Table1Seq &waveforms,
-                          // Return values.
-                          float &min_time,
-                          float &max_time);
 
   // Row.
   TableAxisPtr slew_axis_;
   // Column.
   TableAxisPtr cap_axis_;
   const RiseFall *rf_;
-  Table1Seq current_waveforms_;
+  Table1Seq current_waveforms_;  // from liberty
   Table1Seq voltage_waveforms_;
   Table1Seq voltage_currents_;
-  FloatTable voltage_times_;
   Table1 *ref_times_;
   float vdd_;
-  static constexpr size_t voltage_waveform_step_count_ = 20;
+  static constexpr size_t voltage_waveform_step_count_ = 100;
 };
 
 class DriverWaveform
 {
 public:
-  DriverWaveform(const char *name,
+  DriverWaveform(const std::string &name,
                  TablePtr waveforms);
-  ~DriverWaveform();
-  const char *name() const { return name_; }
+  const char *name() const { return name_.c_str(); }
   Table1 waveform(float slew);
 
 private:
-  const char *name_;
+  std::string name_;
   TablePtr waveforms_;
 };
 

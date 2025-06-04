@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -63,7 +71,7 @@ private:
   void findTimingFromInputs();
   void findTimingFromInput(Port *input_port);
   void findClkedOutputPaths();
-  void findClkInsertionDelays();
+  void findClkTreeDelays();
   void makeClkTreePaths(LibertyPort *lib_port,
                         const MinMax *min_max,
                         TimingSense sense,
@@ -100,7 +108,7 @@ private:
   const Corner *corner_;
   LibertyLibrary *library_;
   LibertyCell *cell_;
-  MinMax *min_max_;
+  const MinMax *min_max_;
   LibertyBuilder *lib_builder_;
   // Output driver table model template to model template.
   Map<const TableTemplate*, TableTemplate*> template_map_;

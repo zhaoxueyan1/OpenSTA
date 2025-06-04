@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2024, Parallax Software, Inc.
+// Copyright (c) 2025, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -13,6 +13,14 @@
 // 
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
+// 
+// The origin of this software must not be misrepresented; you must not
+// claim that you wrote the original software.
+// 
+// Altered source versions must be plainly marked as such, and must not be
+// misrepresented as being the original software.
+// 
+// This notice may not be removed or altered from any source distribution.
 
 #pragma once
 
@@ -154,6 +162,8 @@ public:
 					  bool includes_pin_caps,
 					  const ParasiticAnalysisPt *ap) = 0;
   virtual ParasiticNodeSeq nodes(const Parasitic *parasitic) const = 0;
+  virtual void report(const Parasitic *parasitic) const;
+  virtual const Net *net(const Parasitic *parasitic) const = 0;
   virtual ParasiticResistorSeq resistors(const Parasitic *parasitic) const = 0;
   virtual ParasiticCapacitorSeq capacitors(const Parasitic *parasitic) const = 0;
   // Delete parasitic network if it exists.
@@ -175,6 +185,7 @@ public:
   // Find the parasitic node connected to pin.
   virtual ParasiticNode *findParasiticNode(const Parasitic *parasitic,
                                            const Pin *pin) const = 0;
+  // deprecated 2024-02-27
   virtual ParasiticNode *findNode(const Parasitic *parasitic,
 				  const Pin *pin) const __attribute__ ((deprecated));
   // Make a subnode of the parasitic network net connected to pin.
@@ -188,6 +199,7 @@ public:
   virtual const Pin *pin(const ParasiticNode *node) const = 0;
   virtual const Net *net(const ParasiticNode *node,
                          const Network *network) const = 0;
+  virtual unsigned netId(const ParasiticNode *node) const = 0;
   virtual bool isExternal(const ParasiticNode *node) const = 0;
   // Node capacitance to ground.
   virtual float nodeGndCap(const ParasiticNode *node) const = 0;
@@ -302,10 +314,23 @@ public:
   void setCouplingCapFactor(float factor);
 
 private:
-  string name_;
+  std::string name_;
   int index_;
   int index_max_;
   float coupling_cap_factor_;
+};
+
+class ParasiticNodeLess
+{
+public:
+  ParasiticNodeLess(const Parasitics *parasitics,
+                    const Network *network);
+  ParasiticNodeLess(const ParasiticNodeLess &less);
+  bool operator()(const ParasiticNode *node1,
+                  const ParasiticNode *node2) const;
+private:
+  const Parasitics *parasitics_;
+  const Network *network_;
 };
 
 } // namespace
