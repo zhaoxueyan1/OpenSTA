@@ -113,9 +113,8 @@ VisitPathEnds::visitClkedPathEnds(const Pin *pin,
       else if (vertex->hasChecks())
 	visitCheckEnd(pin, vertex, path, end_rf, path_ap, filtered, visitor,
 		      is_constrained);
-      else if (!sdc_->exceptionToInvalid(pin)
-	       && (!filtered
-		   || search_->matchesFilter(path, nullptr))) {
+      else if (!filtered
+               || search_->matchesFilter(path, nullptr)) {
 	PathDelay *path_delay = pathDelayTo(path, pin, end_rf, path_min_max);
 	if (path_delay) {
 	  PathEndPathDelay path_end(path_delay, path, this);
@@ -163,7 +162,7 @@ VisitPathEnds::visitCheckEnd(const Pin *pin,
 					       tgt_clk_path_ap, this);
 	  while (tgt_clk_path_iter.hasNext()) {
 	    Path *tgt_clk_path = tgt_clk_path_iter.next();
-	    ClkInfo *tgt_clk_info = tgt_clk_path->clkInfo(this);
+	    const ClkInfo *tgt_clk_info = tgt_clk_path->clkInfo(this);
 	    const ClockEdge *tgt_clk_edge = tgt_clk_path->clkEdge(this);
 	    const Clock *tgt_clk = tgt_clk_path->clock(this);
 	    const Pin *tgt_pin = tgt_clk_vertex->pin();
@@ -179,9 +178,6 @@ VisitPathEnds::visitCheckEnd(const Pin *pin,
                     && tgt_clk != sdc_->defaultArrivalClock()
                     && sdc_->sameClockGroup(src_clk, tgt_clk)
                     && !sdc_->clkStopPropagation(tgt_pin, tgt_clk)
-                    && (search_->checkDefaultArrivalPaths()
-                        || src_clk_edge
-                        != sdc_->defaultArrivalClockEdge())
                     // False paths and path delays override
                     // paths.
                     && (exception == nullptr
@@ -231,8 +227,7 @@ VisitPathEnds::visitCheckEnd(const Pin *pin,
       }
     }
   }
-  if (!check_clked
-      && !sdc_->exceptionToInvalid(pin))
+  if (!check_clked)
     visitCheckEndUnclked(pin, vertex, path, end_rf, path_ap, filtered,
 			 visitor, is_constrained);
 }
@@ -362,9 +357,6 @@ VisitPathEnds::visitOutputDelayEnd1(OutputDelay *output_delay,
     is_constrained = true;
   }
   else if (src_clk_edge
-           && (search_->checkDefaultArrivalPaths()
-               || src_clk_edge
-               != sdc_->defaultArrivalClockEdge())
            && tgt_clk_edge
 	   && sdc_->sameClockGroup(path->clock(this), tgt_clk_edge->clock())
 	   // False paths and path delays override.

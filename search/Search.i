@@ -32,6 +32,7 @@
 #include "search/Levelize.hh"
 #include "search/ReportPath.hh"
 #include "PathExpanded.hh"
+#include "Bfs.hh"
 #include "Sta.hh"
 
 using namespace sta;
@@ -251,7 +252,7 @@ vertex_worst_slack_path(Vertex *vertex,
 }
 
 int
-tag_group_path_count()
+tag_group_count()
 {
   return Sta::sta()->tagGroupCount();
 }
@@ -263,9 +264,10 @@ report_tag_groups()
 }
 
 void
-report_tag_arrivals_cmd(Vertex *vertex)
+report_tag_arrivals_cmd(Vertex *vertex,
+			bool report_tag_index)
 {
-  Sta::sta()->search()->reportArrivals(vertex);
+  Sta::sta()->search()->reportArrivals(vertex, report_tag_index);
 }
 
 void
@@ -1126,6 +1128,32 @@ void
 set_use_default_arrival_clock(bool enable)
 {
   Sta::sta()->setUseDefaultArrivalClock(enable);
+}
+
+// For regression tests.
+void
+report_arrival_entries()
+{
+  Sta *sta = Sta::sta();
+  Search *search = sta->search();
+  search->arrivalIterator()->reportEntries();
+}
+
+// For regression tests.
+void
+report_required_entries()
+{
+  Sta *sta = Sta::sta();
+  Search *search = sta->search();
+  search->requiredIterator()->reportEntries();
+}
+
+// For regression tests.
+void
+levelize()
+{
+  Sta *sta = Sta::sta();
+  sta->levelize()->levelize();
 }
 
 %} // inline

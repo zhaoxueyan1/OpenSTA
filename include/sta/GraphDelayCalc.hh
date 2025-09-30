@@ -114,8 +114,10 @@ public:
                            ArcDelayCalc *arc_delay_calc);
   // Precedence:
   //  SDF annotation
-  //  Liberty library
+  //  Liberty port timing group timing_type minimum_period.
+  //  Liberty port min_period attribute.
   void minPeriod(const Pin *pin,
+		 const Corner *corner,
 		 // Return values.
 		 float &min_period,
 		 bool &exists);
@@ -202,7 +204,6 @@ protected:
                                   const DcalcAnalysisPt *dcalc_ap,
                                   ArcDelayCalc *arc_delay_calc);
   void findParallelEdge(Vertex *vertex,
-                        Edge *drvr_edge,
                         const TimingArc *drvr_arc,
                         // Return values.
                         Edge *&edge,

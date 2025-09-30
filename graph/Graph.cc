@@ -35,6 +35,7 @@
 #include "PortDirection.hh"
 #include "Network.hh"
 #include "DcalcAnalysisPt.hh"
+#include "FuncExpr.hh"
 
 namespace sta {
 
@@ -871,6 +872,30 @@ Graph::minPulseWidthArc(Vertex *vertex,
   arc = nullptr;
 }
 
+void
+Graph::minPeriodArc(Vertex *vertex,
+		    const RiseFall *rf,
+		    // Return values.
+		    Edge *&edge,
+		    TimingArc *&arc)
+{
+  VertexOutEdgeIterator edge_iter(vertex, this);
+  while (edge_iter.hasNext()) {
+    edge = edge_iter.next();
+    TimingArcSet *arc_set = edge->timingArcSet();
+    if (arc_set->role() == TimingRole::period()) {
+      for (TimingArc *arc1 : arc_set->arcs()) {
+        if (arc1->fromEdge()->asRiseFall() == rf) {
+          arc = arc1;
+          return;
+        }
+      }
+    }
+  }
+  edge = nullptr;
+  arc = nullptr;
+}
+
 ////////////////////////////////////////////////////////////////
 
 void
@@ -999,7 +1024,7 @@ Vertex::setObjectIdx(ObjectIdx idx)
 string
 Vertex::to_string(const StaState *sta) const
 {
-  const Network *network = sta->network();
+  const Network *network = sta->sdcNetwork();
   if (network->direction(pin_)->isBidirect()) {
     string str = network->pathName(pin_);
     str += ' ';
@@ -1269,6 +1294,11 @@ Edge::to_string(const StaState *sta) const
   string str = from(graph)->to_string(sta);
   str += " -> ";
   str += to(graph)->to_string(sta);
+  FuncExpr *when = arc_set_->cond();
+  if (when) {
+    str += " ";
+    str += when->to_string();
+  }
   return str;
 }
 
@@ -1292,7 +1322,7 @@ Edge::arcDelayAnnotated(const TimingArc *arc,
 {
   size_t index = arc->index() * ap_count + ap_index;
   if (arc_delay_annotated_is_bits_)
-    return arc_delay_annotated_.bits_ & (1 << index);
+    return arc_delay_annotated_.bits_ & arcDelayAnnotateBit(index);
   else
     return (*arc_delay_annotated_.seq_)[index];
 }
@@ -1304,7 +1334,7 @@ Edge::setArcDelayAnnotated(const TimingArc *arc,
                            bool annotated)
 {
   size_t index = arc->index() * ap_count + ap_index;
-  if (index > sizeof(intptr_t) * 8
+  if (index > sizeof(uintptr_t) * 8
       && arc_delay_annotated_is_bits_) {
     arc_delay_annotated_is_bits_ = false;
     size_t bit_count = ap_count * RiseFall::index_count * 2;
@@ -1312,9 +1342,9 @@ Edge::setArcDelayAnnotated(const TimingArc *arc,
   }
   if (arc_delay_annotated_is_bits_) {
     if (annotated)
-      arc_delay_annotated_.bits_ |= (1 << index);
+      arc_delay_annotated_.bits_ |= arcDelayAnnotateBit(index);
     else
-      arc_delay_annotated_.bits_ &= ~(1 << index);
+      arc_delay_annotated_.bits_ &= ~arcDelayAnnotateBit(index);
   }
   else
     (*arc_delay_annotated_.seq_)[index] = annotated;
@@ -1336,6 +1366,12 @@ void
 Edge::setDelayAnnotationIsIncremental(bool is_incr)
 {
   delay_annotation_is_incremental_ = is_incr;
+}
+
+uintptr_t
+Edge::arcDelayAnnotateBit(size_t index)
+{
+  return static_cast<uintptr_t>(1) << index;
 }
 
 const TimingRole *

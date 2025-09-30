@@ -49,7 +49,7 @@ Path::Path() :
 {
 }
 
-Path::Path(Path *path) :
+Path::Path(const Path *path) :
   prev_path_(path ? path->prev_path_ : nullptr),
   arrival_(path ? path->arrival_ : 0.0),
   required_(path ? path->required_ : 0.0),
@@ -203,13 +203,17 @@ Path::init(Vertex *vertex,
 std::string
 Path::to_string(const StaState *sta) const
 {
-  const PathAnalysisPt *path_ap = pathAnalysisPt(sta);
-  return stringPrintTmp("%s %s %s/%d %d",
-                        vertex(sta)->to_string(sta).c_str(),
-                        transition(sta)->to_string().c_str(),
-                        path_ap->pathMinMax()->to_string().c_str(),
-                        path_ap->index(),
-                        tagIndex(sta));
+  if (isNull())
+    return "null path";
+  else {
+    const PathAnalysisPt *path_ap = pathAnalysisPt(sta);
+    return stringPrintTmp("%s %s %s/%d %d",
+                          vertex(sta)->to_string(sta).c_str(),
+                          transition(sta)->to_string().c_str(),
+                          path_ap->pathMinMax()->to_string().c_str(),
+                          path_ap->index(),
+                          tagIndex(sta));
+  }
 }
 
 bool
@@ -275,7 +279,7 @@ Path::pathIndex(const StaState *sta) const
   return this - paths;
 }
 
-ClkInfo *
+const ClkInfo *
 Path::clkInfo(const StaState *sta) const
 {
   return tag(sta)->clkInfo();
@@ -438,18 +442,11 @@ Path::setPrevEdgeArc(Edge *prev_edge,
 }
 
 void
-Path::checkPrevPaths(const StaState *sta) const
-{
-  const Path *path = this;
-  while (path) {
-    path->checkPrevPath(sta);
-    path = path->prevPath();
-  }
-}
-
-void
 Path::checkPrevPath(const StaState *sta) const
 {
+  if (prev_path_ && prev_path_->isNull())
+    sta->report()->reportLine("path %s prev path is null.",
+                              to_string(sta).c_str());
   if (prev_path_ && !prev_path_->isNull()) {
     Graph *graph = sta->graph();
     Edge *edge = prevEdge(sta);
@@ -611,10 +608,20 @@ Path::cmp(const Path *path1,
 	  const Path *path2,
 	  const StaState *sta)
 {
-  if (path1 && path2) {
+  if (path1 == path2)
+    return 0;
+  else if (path1 == nullptr && path2)
+    return 1;
+  else if (path1 && path2 == nullptr)
+    return -1;
+  else {
     VertexId vertex_id1 = path1->vertexId(sta);
     VertexId vertex_id2 = path2->vertexId(sta);
-    if (vertex_id1 == vertex_id2) {
+    if (vertex_id1 < vertex_id2)
+      return -1;
+    else if (vertex_id1 > vertex_id2)
+      return 1;
+    else {
       TagIndex tag_index1 = path1->tagIndex(sta);
       TagIndex tag_index2 = path2->tagIndex(sta);
       if (tag_index1 == tag_index2)
@@ -624,18 +631,7 @@ Path::cmp(const Path *path1,
       else
 	return 1;
     }
-    else if (vertex_id1 < vertex_id2)
-      return -1;
-    else
-      return 1;
   }
-  else if (path1 == nullptr
-	   && path2 == nullptr)
-    return 0;
-  else if (path1 == nullptr)
-    return -1;
-  else
-    return 1;
 }
 
 int
@@ -646,7 +642,7 @@ Path::cmpNoCrpr(const Path *path1,
   VertexId vertex_id1 = path1->vertexId(sta);
   VertexId vertex_id2 = path2->vertexId(sta);
   if (vertex_id1 == vertex_id2)
-    return tagMatchCmp(path1->tag(sta), path2->tag(sta), false, sta);
+    return Tag::matchCmp(path1->tag(sta), path2->tag(sta), false, sta);
   else if (vertex_id1 < vertex_id2)
     return -1;
   else

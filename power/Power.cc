@@ -105,6 +105,17 @@ Power::Power(StaState *sta) :
 }
 
 void
+Power::clear()
+{
+  global_activity_.init();
+  input_activity_.init();
+  user_activity_map_.clear();
+  seq_activity_map_.clear();
+  activity_map_.clear();
+  activities_valid_ = false;
+}
+
+void
 Power::setGlobalActivity(float density,
 			 float duty)
 {
@@ -113,10 +124,24 @@ Power::setGlobalActivity(float density,
 }
   
 void
+Power::unsetGlobalActivity()
+{
+  global_activity_.init();
+  activities_valid_ = false;
+}
+
+void
 Power::setInputActivity(float density,
 			float duty)
 {
   input_activity_.set(density, duty, PwrActivityOrigin::input);
+  activities_valid_ = false;
+}
+
+void
+Power::unsetInputActivity()
+{
+  input_activity_.init();
   activities_valid_ = false;
 }
 
@@ -134,12 +159,30 @@ Power::setInputPortActivity(const Port *input_port,
 }
 
 void
+Power::unsetInputPortActivity(const Port *input_port)
+{
+  Instance *top_inst = network_->topInstance();
+  const Pin *pin = network_->findPin(top_inst, input_port);
+  if (pin) {
+    user_activity_map_.erase(pin);
+    activities_valid_ = false;
+  }
+}
+
+void
 Power::setUserActivity(const Pin *pin,
                        float density,
                        float duty,
                        PwrActivityOrigin origin)
 {
   user_activity_map_[pin] = {density, duty, origin};
+  activities_valid_ = false;
+}
+
+void
+Power::unsetUserActivity(const Pin *pin)
+{
+  user_activity_map_.erase(pin);
   activities_valid_ = false;
 }
 
@@ -448,6 +491,11 @@ PropActivityVisitor::visit(Vertex *vertex)
     if (network_->isDriver(pin)) {
       LibertyPort *port = network_->libertyPort(pin);
       if (port) {
+        LibertyCell *test_cell = port->libertyCell()->testCell();
+        if (test_cell)
+          port = test_cell->findLibertyPort(port->name());
+      }
+      if (port) {
 	FuncExpr *func = port->function();
 	if (func) {
           PwrActivity activity = power_->evalActivity(func, inst);
@@ -476,23 +524,28 @@ PropActivityVisitor::visit(Vertex *vertex)
   }
   if (changed) {
     LibertyCell *cell = network_->libertyCell(inst);
-    if (network_->isLoad(pin) && cell) {
-      if (cell->hasSequentials()) {
-        debugPrint(debug_, "power_activity", 3, "pending seq %s",
-                   network_->pathName(inst));
-        visited_regs_.insert(inst);
+    if (cell) {
+      LibertyCell *test_cell = cell->libertyCell()->testCell();
+      if (network_->isLoad(pin)) {
+	if (cell->hasSequentials()
+	    || (test_cell
+		&& test_cell->hasSequentials())) {
+	  debugPrint(debug_, "power_activity", 3, "pending seq %s",
+		     network_->pathName(inst));
+	  visited_regs_.insert(inst);
+	}
+	// Gated clock cells latch the enable so there is no EN->GCLK timing arc.
+	if (cell->isClockGate()) {
+	  const Pin *enable, *clk, *gclk;
+	  power_->clockGatePins(inst, enable, clk, gclk);
+	  if (gclk) {
+	    Vertex *gclk_vertex = graph_->pinDrvrVertex(gclk);
+	    bfs_->enqueue(gclk_vertex);
+	  }
+	}
       }
-      // Gated clock cells latch the enable so there is no EN->GCLK timing arc.
-      if (cell->isClockGate()) {
-        const Pin *enable, *clk, *gclk;
-        power_->clockGatePins(inst, enable, clk, gclk);
-        if (gclk) {
-          Vertex *gclk_vertex = graph_->pinDrvrVertex(gclk);
-          bfs_->enqueue(gclk_vertex);
-        }
-      }
+      bfs_->enqueueAdjacentVertices(vertex);
     }
-    bfs_->enqueueAdjacentVertices(vertex);
   }
 }
 
@@ -664,7 +717,7 @@ Power::ensureActivities()
 
       // Initialize default input activity (after sdc is defined)
       // unless it has been set by command.
-      if (input_activity_.density() == 0.0) {
+      if (input_activity_.origin() == PwrActivityOrigin::unknown) {
         float min_period = clockMinPeriod();
         float density = 0.1 / (min_period != 0.0
                                ? min_period
@@ -682,12 +735,9 @@ Power::ensureActivities()
       int pass = 1;
       while (!regs.empty() && pass < max_activity_passes_) {
         visitor.init();
-        InstanceSet::Iterator reg_iter(regs);
-	while (reg_iter.hasNext()) {
-	  const Instance *reg = reg_iter.next();
+	for (const Instance *reg : regs)
 	  // Propagate activiities across register D->Q.
 	  seedRegOutputActivities(reg, bfs);
-	}
 	// Propagate register output activities through
 	// combinational logic.
 	bfs.visit(levelize_->maxLevel(), &visitor);
@@ -705,7 +755,7 @@ Power::ensureActivities()
 void
 Power::seedActivities(BfsFwdIterator &bfs)
 {
-  for (Vertex *vertex : *levelize_->roots()) {
+  for (Vertex *vertex : levelize_->roots()) {
     const Pin *pin = vertex->pin();
     // Clock activities are baked in.
     if (!sdc_->isLeafPinClock(pin)
@@ -728,7 +778,11 @@ Power::seedRegOutputActivities(const Instance *inst,
 			       BfsFwdIterator &bfs)
 {
   LibertyCell *cell = network_->libertyCell(inst);
-  for (Sequential *seq : cell->sequentials()) {
+  LibertyCell *test_cell = cell->testCell();
+  const SequentialSeq &seqs = test_cell
+    ? test_cell->sequentials()
+    : cell->sequentials();
+  for (Sequential *seq : seqs) {
     seedRegOutputActivities(inst, seq, seq->output(), false);
     seedRegOutputActivities(inst, seq, seq->outputInv(), true);
     // Enqueue register output pins with functions that reference
@@ -737,6 +791,8 @@ Power::seedRegOutputActivities(const Instance *inst,
     while (pin_iter->hasNext()) {
       Pin *pin = pin_iter->next();
       LibertyPort *port = network_->libertyPort(pin);
+      if (test_cell)
+	port = test_cell->findLibertyPort(port->name());
       if (port) {
         FuncExpr *func = port->function();
         Vertex *vertex = graph_->pinDrvrVertex(pin);
@@ -1535,6 +1591,7 @@ PwrActivity::PwrActivity(float density,
   duty_(duty),
   origin_(origin)
 {
+  check();
 }
 
 PwrActivity::PwrActivity() :
@@ -1542,7 +1599,6 @@ PwrActivity::PwrActivity() :
   duty_(0.0),
   origin_(PwrActivityOrigin::unknown)
 {
-  check();
 }
 
 void
@@ -1561,6 +1617,14 @@ void
 PwrActivity::setOrigin(PwrActivityOrigin origin)
 {
   origin_ = origin;
+}
+
+void
+PwrActivity::init()
+{
+  density_ = 0.0;
+  duty_ = 0.0;
+  origin_ = PwrActivityOrigin::unknown;
 }
 
 void

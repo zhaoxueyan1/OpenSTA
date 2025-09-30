@@ -41,7 +41,7 @@ class Path
 {
 public:
   Path();
-  Path(Path *path);
+  Path(const Path *path);
   Path(Vertex *vertex,
        Tag *tag,
        const StaState *sta);
@@ -89,7 +89,7 @@ public:
   TagIndex tagIndex(const StaState *sta) const;
   void setTag(Tag *tag);
   size_t pathIndex(const StaState *sta) const;
-  ClkInfo *clkInfo(const StaState *sta) const;
+  const ClkInfo *clkInfo(const StaState *sta) const;
   const ClockEdge *clkEdge(const StaState *sta) const;
   const Clock *clock(const StaState *sta) const;
   bool isClock(const StaState *sta) const;
@@ -120,7 +120,6 @@ public:
   bool isEnum() const { return is_enum_; }
   void setIsEnum(bool is_enum);
   void checkPrevPath(const StaState *sta) const;
-  void checkPrevPaths(const StaState *sta) const;
 
   static Path *vertexPath(const Path *path,
                           const StaState *sta);

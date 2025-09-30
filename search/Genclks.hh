@@ -27,7 +27,7 @@
 #include "Map.hh"
 #include "Transition.hh"
 #include "NetworkClass.hh"
-#include "GraphClass.hh"
+#include "Graph.hh"
 #include "SdcClass.hh"
 #include "SearchClass.hh"
 #include "StaState.hh"
@@ -51,6 +51,7 @@ public:
 
 typedef Map<Clock*, GenclkInfo*> GenclkInfoMap;
 typedef Map<ClockPinPair, std::vector<Path>, ClockPinPairLess> GenclkSrcPathMap;
+typedef std::map<Vertex*, std::vector<const Path*>, VertexIdLess> VertexGenclkSrcPathsMap;
 
 class Genclks : public StaState
 {
@@ -71,20 +72,19 @@ public:
 			 const EarlyLate *early_late,
 			 const PathAnalysisPt *path_ap) const;
   // Generated clock source path for a clock path root.
-  Path *srcPath(const Path *clk_path) const;
+  const Path *srcPath(const Path *clk_path) const;
   // Generated clock source path.
-  Path *srcPath(const ClockEdge *clk_edge,
-                const Pin *src_pin,
-                const PathAnalysisPt *path_ap) const;
-  Path *srcPath(const Clock *clk,
-                const Pin *src_pin,
-                const RiseFall *rf,
-                const PathAnalysisPt *path_ap) const;
+  const Path *srcPath(const ClockEdge *clk_edge,
+                      const Pin *src_pin,
+                      const PathAnalysisPt *path_ap) const;
+  const Path *srcPath(const Clock *clk,
+                      const Pin *src_pin,
+                      const RiseFall *rf,
+                      const PathAnalysisPt *path_ap) const;
   Vertex *srcPath(const Pin *pin) const;
   Level clkPinMaxLevel(const Clock *clk) const;
   void copyGenClkSrcPaths(Vertex *vertex,
 			  TagGroupBldr *tag_bldr);
-  void updateSrcPathPrevs();
 
 private:
   void findInsertionDelays();
@@ -112,6 +112,7 @@ private:
 		       const Pin *master_pin,
 		       const RiseFall *rf,
 		       FilterPath *src_filter,
+                       Arrival insert,
 		       const PathAnalysisPt *path_ap);
   void seedSrcPins(Clock *clk,
 		   BfsBkwdIterator &iter);
@@ -129,10 +130,12 @@ private:
 			  VertexSet &path_vertices,
 			  VertexSet &visited_vertices,
 			  EdgeSet *&fdbk_edges);
+  void deleteGenclkSrcPaths(Clock *gclk);
 
   bool found_insertion_delays_;
   GenclkSrcPathMap genclk_src_paths_;
   GenclkInfoMap genclk_info_map_;
+  VertexGenclkSrcPathsMap vertex_src_paths_map_;
 };
 
 } // namespace

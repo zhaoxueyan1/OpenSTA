@@ -260,8 +260,10 @@ GraphDelayCalc::findDelays(Level level)
     if (incremental_)
       seedInvalidDelays();
 
-    FindVertexDelays visitor(this);
-    dcalc_count += iter_->visitParallel(level, &visitor);
+    if (!iter_->empty()) {
+      FindVertexDelays visitor(this);
+      dcalc_count += iter_->visitParallel(level, &visitor);
+    }
 
     // Timing checks require slews at both ends of the arc,
     // so find their delays after all slews are known.
@@ -297,7 +299,7 @@ GraphDelayCalc::seedInvalidDelays()
 void
 GraphDelayCalc::seedRootSlews()
 {
-  for (Vertex *vertex : *levelize_->roots())
+  for (Vertex *vertex : levelize_->roots())
     seedRootSlew(vertex, arc_delay_calc_);
 }
 
@@ -1010,7 +1012,7 @@ GraphDelayCalc::makeArcDcalcArgs(Vertex *drvr_vertex,
       arc1 = arc;
     }
     else
-      findParallelEdge(drvr_vertex1, edge, arc, edge1, arc1);
+      findParallelEdge(drvr_vertex1, arc, edge1, arc1);
     // Shockingly one fpga vendor connects outputs with no timing arcs together.
     if (edge1) {
       Vertex *from_vertex = edge1->from(graph_);
@@ -1034,7 +1036,6 @@ GraphDelayCalc::makeArcDcalcArgs(Vertex *drvr_vertex,
 // primary driver drvr_edge/drvr_arc.
 void
 GraphDelayCalc::findParallelEdge(Vertex *vertex,
-                                 Edge *drvr_edge,
                                  const TimingArc *drvr_arc,
                                  // Return values.
                                  Edge *&edge,
@@ -1045,11 +1046,10 @@ GraphDelayCalc::findParallelEdge(Vertex *vertex,
   if (vertex_cell == drvr_cell) {
     // Homogeneous drivers.
     arc = drvr_arc;
-    LibertyPort *from_port = network_->libertyPort(drvr_edge->from(graph_)->pin());
     VertexInEdgeIterator edge_iter(vertex, graph_);
     while (edge_iter.hasNext()) {
       edge = edge_iter.next();
-      if (network_->libertyPort(edge->from(graph_)->pin()) == from_port)
+      if (edge->timingArcSet() == arc->set())
         return;
     }
   }
@@ -1597,28 +1597,39 @@ GraphDelayCalc::reportDelayCalc(const Edge *edge,
 
 void
 GraphDelayCalc::minPeriod(const Pin *pin,
+			  const Corner *corner,
 			  // Return values.
 			  float &min_period,
 			  bool &exists)
 {
   exists = false;
   const MinMax *min_max = MinMax::max();
-  for (const DcalcAnalysisPt *dcalc_ap : corners_->dcalcAnalysisPts()) {
-    // Sdf annotation.
-    float min_period1 = 0.0;
-    bool exists1 = false;
-    graph_->periodCheckAnnotation(pin, dcalc_ap->index(),
-				  min_period, exists);
-    if (exists1 
-	&& (!exists || min_period1 < min_period)) {
-      min_period = min_period1;
+  const DcalcAnalysisPt *dcalc_ap = corner->findDcalcAnalysisPt(min_max);
+  // Sdf annotation.
+  float min_period1 = 0.0;
+  bool exists1 = false;
+  graph_->periodCheckAnnotation(pin, dcalc_ap->index(),
+				min_period, exists);
+  if (exists1
+      && (!exists || min_period1 < min_period)) {
+    min_period = min_period1;
+    exists = true;
+  }
+  if (!exists) {
+    // Liberty timing group timing_type minimum_period.
+    Vertex *vertex = graph_->pinLoadVertex(pin);
+    Edge *edge;
+    TimingArc *arc;
+    graph_->minPeriodArc(vertex, RiseFall::rise(), edge, arc);
+    if (edge) {
       exists = true;
+      min_period = delayAsFloat(graph_->arcDelay(edge, arc, dcalc_ap->index()));
     }
   }
   if (!exists) {
+    // Liberty port min_period attribute.
     LibertyPort *port = network_->libertyPort(pin);
     if (port) {
-      // Liberty library.
       Instance *inst = network_->instance(pin);
       OperatingConditions *op_cond = sdc_->operatingConditions(min_max);
       const Pvt *pvt = inst ? sdc_->pvt(inst, min_max) : nullptr;

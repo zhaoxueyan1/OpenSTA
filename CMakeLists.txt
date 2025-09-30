@@ -39,6 +39,7 @@ project(STA VERSION 2.7.0
 option(CUDD_DIR "CUDD BDD package directory")
 option(USE_TCL_READLINE "Use TCL readline package" ON)
 option(ENABLE_TSAN "Compile with thread santizer enabled" OFF)
+option(ENABLE_ASAN "Compile with address santizer enabled" OFF)
 
 # Turn on to debug compiler args.
 set(CMAKE_VERBOSE_MAKEFILE OFF)
@@ -424,6 +425,7 @@ set(SWIG_FILES
   ${STA_HOME}/power/Power.i
   ${STA_HOME}/sdc/Sdc.i
   ${STA_HOME}/sdf/Sdf.i
+  ${STA_HOME}/search/Property.i
   ${STA_HOME}/search/Search.i
   ${STA_HOME}/spice/WriteSpice.i
   ${STA_HOME}/tcl/Exception.i
@@ -531,12 +533,19 @@ if (TCL_READLINE)
 endif()
 
 # common to gcc/clang
-set(CXX_FLAGS -Wall -Wextra -pedantic -Wcast-qual -Wredundant-decls -Wformat-security)
+set(CXX_FLAGS -Wall -Wextra -pedantic -Wcast-qual -Wredundant-decls
+  -Wformat-security -Werror=misleading-indentation)
 
 if(ENABLE_TSAN)
   message(STATUS "Thread sanitizer: ${ENABLE_TSAN}")
   set(CXX_FLAGS "${CXX_FLAGS};-fsanitize=thread")
   set(CMAKE_EXE_LINKER_FLAGS "-fsanitize=thread")
+endif()
+
+if(ENABLE_ASAN)
+  message(STATUS "Address sanitizer: ${ENABLE_ASAN}")
+  set(CXX_FLAGS "${CXX_FLAGS};-fsanitize=address")
+  set(CMAKE_EXE_LINKER_FLAGS "-fsanitize=address")
 endif()
 
 target_compile_options(OpenSTA
@@ -584,20 +593,26 @@ install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include/sta  DESTINATION include)
 
 ################################################################
 
-add_custom_target(sta_tags etags -o TAGS
+add_custom_target(sta_tags
+  COMMAND etags -o TAGS
   ${STA_SOURCE}
   */*.hh
   include/sta/*.hh
   ${CMAKE_CURRENT_BINARY_DIR}/include/sta/*.hh
   ${SWIG_FILES}
+  ${SWIG_FILES}
+
+  # Append tcl tags.
+  # Note that the regexp used for tcl files is broken in etags so provide one that works.
+  COMMAND etags -a -o TAGS --language=none
+  --regex='/^[ \\t]*proc[ \\t]+[a-zA-Z0-9_]+/'
   ${STA_TCL_FILES}
-  ${SWIG_TCL_FILES}
   WORKING_DIRECTORY ${STA_HOME}
-  )
+)
 
 add_custom_command(
   TARGET OpenSTA
   POST_BUILD
-  COMMAND ${CMAKE_SOURCE_DIR}/etc/FindMessages.tcl > ${CMAKE_SOURCE_DIR}/doc/messages.txt || true
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  COMMAND ${STA_HOME}/etc/FindMessages.tcl > ${STA_HOME}/doc/messages.txt || true
+  WORKING_DIRECTORY ${STA_HOME}
 )

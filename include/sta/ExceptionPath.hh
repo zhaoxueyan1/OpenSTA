@@ -632,7 +632,7 @@ private:
   void expandFrom();
   void expandThrus(ExceptionFrom *expanded_from);
   void expandThru(ExceptionFrom *expanded_from,
-		  ExceptionThruSeq::Iterator &thru_iter,
+		  size_t next_thru_idx,
 		  ExceptionThruSeq *expanded_thrus);
   void expandTo(ExceptionFrom *expanded_from,
 		ExceptionThruSeq *expanded_thrus);
@@ -666,6 +666,10 @@ private:
   ExceptionState *next_state_;
   int index_;
 };
+
+bool
+exceptionStateLess(const ExceptionState *state1,
+		   const ExceptionState *state2);
 
 // Exception thrown by check.
 class EmptyExpceptionPt : public Exception

@@ -130,15 +130,13 @@ LibertyLibrary::~LibertyLibrary()
   wireloads_.deleteContents();
   wire_load_selections_.deleteContents();
   delete units_;
+  // Also deletes default_ocv_derate_
   ocv_derate_map_.deleteContents();
 
   delete buffers_;
   delete inverters_;
   driver_waveform_map_.deleteContents();
   delete driver_waveform_default_;
-
-  delete default_ocv_derate_;
-  default_ocv_derate_ = nullptr;
 }
 
 LibertyCell *
@@ -996,6 +994,14 @@ LibertyCell::findLibertyPortsMatching(PatternMatch *pattern) const
     LibertyPort *port = port_iter.next();
     if (pattern->match(port->name()))
       matches.push_back(port);
+    if (port->hasMembers()) {
+      LibertyPortMemberIterator port_iter2(port);
+      while (port_iter2.hasNext()) {
+	LibertyPort *port2 = port_iter2.next();
+	if (pattern->match(port2->name()))
+	  matches.push_back(port2);
+      }
+    }
   }
   return matches;
 }
@@ -1169,7 +1175,8 @@ LibertyCell::isBuffer() const
   bufferPorts(input, output);
   return input && output
     && hasBufferFunc(input, output)
-    && !is_level_shifter_;
+    && !is_level_shifter_
+    && !is_pad_;
 }
 
 bool
@@ -1189,7 +1196,9 @@ LibertyCell::isInverter() const
   LibertyPort *output;
   bufferPorts(input, output);
   return input && output
-    && hasInverterFunc(input, output);
+    && hasInverterFunc(input, output)
+    && !is_level_shifter_
+    && !is_pad_;
 }
 
 bool
@@ -1246,10 +1255,13 @@ LibertyCell::addTimingArcSet(TimingArcSet *arc_set)
   timing_arc_sets_.push_back(arc_set);
 
   LibertyPort *from = arc_set->from();
+  LibertyPort *to = arc_set->to();
   const TimingRole *role = arc_set->role();
   if (role == TimingRole::regClkToQ()
-      || role == TimingRole::latchEnToQ())
+      || role == TimingRole::latchEnToQ()) {
     from->setIsRegClk(true);
+    to->setIsRegOutput(true);
+  }
   if (role->isTimingCheck())
     from->setIsCheckClk(true);
   return set_index;
@@ -1883,7 +1895,7 @@ LibertyCell::makeLatchEnable(LibertyPort *d,
   latch_enables_.push_back(latch_enable);
   latch_d_to_q_map_[d_to_q] = latch_enable;
   latch_check_map_[setup_check] = latch_enable;
-  latch_data_ports_.insert(d);
+  d->setIsLatchData(true);
   debugPrint(debug, "liberty_latch", 1,
              "latch %s -> %s | %s %s -> %s | %s %s -> %s setup",
              d->name(),
@@ -1933,12 +1945,6 @@ LibertyCell::inferLatchRoles(Report *report,
       }
     }
   }
-}
-
-bool
-LibertyCell::isLatchData(LibertyPort *port)
-{
-  return latch_data_ports_.hasKey(port);
 }
 
 void
@@ -2102,6 +2108,8 @@ LibertyPort::LibertyPort(LibertyCell *cell,
   min_period_exists_(false),
   is_clk_(false),
   is_reg_clk_(false),
+  is_reg_output_(false),
+  is_latch_data_(false),
   is_check_clk_(false),
   is_clk_gate_clk_(false),
   is_clk_gate_enable_(false),
@@ -2177,6 +2185,12 @@ LibertyPort *
 LibertyPort::findLibertyBusBit(int index) const
 {
   return static_cast<LibertyPort*>(findBusBit(index));
+}
+
+LibertyPort *
+LibertyPort::bundlePort() const
+{
+  return static_cast<LibertyPort*>(bundle_port_);
 }
 
 void
@@ -2344,7 +2358,7 @@ void
 LibertyPort::setFunction(FuncExpr *func)
 {
   function_ = func;
-  if (is_bus_ || is_bundle_) {
+  if (hasMembers()) {
     LibertyPortMemberIterator member_iter(this);
     int bit_offset = 0;
     while (member_iter.hasNext()) {
@@ -2385,6 +2399,7 @@ LibertyPort::setSlewLimit(float slew,
 			  const MinMax *min_max)
 {
   slew_limit_.setValue(min_max, slew);
+  setMemberMinMaxFloat(slew, min_max, &LibertyPort::setSlewLimit);
 }
 
 void
@@ -2401,6 +2416,7 @@ LibertyPort::setCapacitanceLimit(float cap,
 				 const MinMax *min_max)
 {
   cap_limit_.setValue(min_max, cap);
+  setMemberMinMaxFloat(cap, min_max, &LibertyPort::setCapacitanceLimit);
 }
 
 void
@@ -2417,6 +2433,7 @@ LibertyPort::setFanoutLoad(float fanout_load)
 {
   fanout_load_ = fanout_load;
   fanout_load_exists_ = true;
+  setMemberFloat(fanout_load, &LibertyPort::setFanoutLoad);
 }
 
 void
@@ -2467,6 +2484,13 @@ LibertyPort::setMinPeriod(float min_period)
 {
   min_period_ = min_period;
   min_period_exists_ = true;
+  if (hasMembers()) {
+    LibertyPortMemberIterator member_iter(this);
+    while (member_iter.hasNext()) {
+      LibertyPort *port_bit = member_iter.next();
+      port_bit->setMinPeriod(min_period);
+    }
+  }
 }
 
 void
@@ -2486,6 +2510,13 @@ LibertyPort::setMinPulseWidth(const RiseFall *hi_low,
   int hi_low_index = hi_low->index();
   min_pulse_width_[hi_low_index] = min_width;
   min_pulse_width_exists_ |= (1 << hi_low_index);
+  if (hasMembers()) {
+    LibertyPortMemberIterator member_iter(this);
+    while (member_iter.hasNext()) {
+      LibertyPort *port_bit = member_iter.next();
+      port_bit->setMinPulseWidth(hi_low, min_width);
+    }
+  }
 }
 
 bool
@@ -2535,12 +2566,28 @@ void
 LibertyPort::setIsClock(bool is_clk)
 {
   is_clk_ = is_clk;
+  setMemberFlag(is_clk, &LibertyPort::setIsClock);
 }
 
 void
 LibertyPort::setIsRegClk(bool is_clk)
 {
   is_reg_clk_ = is_clk;
+  setMemberFlag(is_clk, &LibertyPort::setIsRegClk);
+}
+
+void
+LibertyPort::setIsRegOutput(bool is_reg_out)
+{
+  is_reg_output_ = is_reg_out;
+  setMemberFlag(is_reg_out, &LibertyPort::setIsRegOutput);
+}
+
+void
+LibertyPort::setIsLatchData(bool is_latch_data)
+{
+  is_latch_data_ = is_latch_data;
+  setMemberFlag(is_latch_data, &LibertyPort::setIsLatchData);
 }
 
 void
@@ -2577,24 +2624,28 @@ void
 LibertyPort::setIsolationCellData(bool isolation_cell_data)
 {
   isolation_cell_data_ = isolation_cell_data;
+  setMemberFlag(isolation_cell_data, &LibertyPort::setIsolationCellData);
 }
 
 void
 LibertyPort::setIsolationCellEnable(bool isolation_cell_enable)
 {
   isolation_cell_enable_ = isolation_cell_enable;
+  setMemberFlag(isolation_cell_enable, &LibertyPort::setIsolationCellEnable);
 }
 
 void
 LibertyPort::setLevelShifterData(bool level_shifter_data)
 {
   level_shifter_data_ = level_shifter_data;
+  setMemberFlag(level_shifter_data, &LibertyPort::setLevelShifterData);
 }
 
 void
 LibertyPort::setIsSwitch(bool is_switch)
 {
   is_switch_ = is_switch;
+  setMemberFlag(is_switch, &LibertyPort::setIsSwitch);
 }
 
 void
@@ -2806,6 +2857,50 @@ LibertyPort::setClkTreeDelay(const TableModel *model,
   clk_tree_delay_[from_rf->index()][to_rf->index()][min_max->index()] = model;
 }
 
+void
+LibertyPort::setMemberFlag(bool value,
+			   const std::function<void(LibertyPort*,
+						    bool)> &setter)
+{
+  if (hasMembers()) {
+    LibertyPortMemberIterator member_iter(this);
+    while (member_iter.hasNext()) {
+      LibertyPort *port_bit = member_iter.next();
+      setter(port_bit, value);
+    }
+  }
+}
+
+void
+LibertyPort::setMemberFloat(float value,
+			    const std::function<void(LibertyPort*,
+						     float)> &setter)
+{
+  if (hasMembers()) {
+    LibertyPortMemberIterator member_iter(this);
+    while (member_iter.hasNext()) {
+      LibertyPort *port_bit = member_iter.next();
+      setter(port_bit, value);
+    }
+  }
+}
+
+void
+LibertyPort::setMemberMinMaxFloat(float value,
+				  const MinMax *min_max,
+				  const std::function<void(LibertyPort*,
+							   float,
+							   const MinMax *)> &setter)
+{
+  if (hasMembers()) {
+    LibertyPortMemberIterator member_iter(this);
+    while (member_iter.hasNext()) {
+      LibertyPort *port_bit = member_iter.next();
+      setter(port_bit, value, min_max);
+    }
+  }
+}
+
 ////////////////////////////////////////////////////////////////
 
 LibertyPortSeq
@@ -2816,6 +2911,13 @@ sortByName(const LibertyPortSet *set)
     ports.push_back(port);
   sort(ports, LibertyPortNameLess());
   return ports;
+}
+
+bool
+LibertyPortLess::operator()(const LibertyPort *port1,
+                            const LibertyPort *port2) const
+{
+  return LibertyPort::less(port1, port2);
 }
 
 bool
@@ -2914,6 +3016,12 @@ ModeValueDef::~ModeValueDef()
 {
   if (cond_)
     cond_->deleteSubexprs();
+}
+
+void
+ModeValueDef::setCond(FuncExpr *cond)
+{
+  cond_ = cond;
 }
 
 void

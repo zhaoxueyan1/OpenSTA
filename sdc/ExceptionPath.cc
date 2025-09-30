@@ -2146,9 +2146,8 @@ ExpandedExceptionVisitor::expandThrus(ExceptionFrom *expanded_from)
   ExceptionThruSeq *thrus = exception_->thrus();
   if (thrus) {
     // Use tail recursion to expand the exception points in the thrus.
-    ExceptionThruSeq::Iterator thru_iter(thrus);
     ExceptionThruSeq expanded_thrus;
-    expandThru(expanded_from, thru_iter, &expanded_thrus);
+    expandThru(expanded_from, 0, &expanded_thrus);
   }
   else
     expandTo(expanded_from, nullptr);
@@ -2156,40 +2155,41 @@ ExpandedExceptionVisitor::expandThrus(ExceptionFrom *expanded_from)
 
 void
 ExpandedExceptionVisitor::expandThru(ExceptionFrom *expanded_from,
-				     ExceptionThruSeq::Iterator &thru_iter,
+				     size_t next_thru_idx,
 				     ExceptionThruSeq *expanded_thrus)
 {
-  if (thru_iter.hasNext()) {
-    ExceptionThru *thru = thru_iter.next();
+  ExceptionThruSeq *thrus = exception_->thrus();
+  if (next_thru_idx < thrus->size()) {
+    ExceptionThru *thru = (*thrus)[next_thru_idx];
     const RiseFallBoth *rf = thru->transition();
     if (thru->pins()) {
       for (const Pin *pin : *thru->pins()) {
-        PinSet pins(network_);
-        pins.insert(pin);
-        ExceptionThru expanded_thru(&pins, nullptr, nullptr, rf, false, network_);
-        expanded_thrus->push_back(&expanded_thru);
-        expandThru(expanded_from, thru_iter, expanded_thrus);
-        expanded_thrus->pop_back();
+	PinSet pins(network_);
+	pins.insert(pin);
+	ExceptionThru expanded_thru(&pins, nullptr, nullptr, rf, false, network_);
+	expanded_thrus->push_back(&expanded_thru);
+	expandThru(expanded_from, next_thru_idx + 1, expanded_thrus);
+	expanded_thrus->pop_back();
       }
     }
     if (thru->nets()) {
       for (const Net *net : *thru->nets()) {
-        NetSet nets(network_);
-        nets.insert(net);
-        ExceptionThru expanded_thru(nullptr, &nets, nullptr, rf, false, network_);
-        expanded_thrus->push_back(&expanded_thru);
-        expandThru(expanded_from, thru_iter, expanded_thrus);
-        expanded_thrus->pop_back();
+	NetSet nets(network_);
+	nets.insert(net);
+	ExceptionThru expanded_thru(nullptr, &nets, nullptr, rf, false, network_);
+	expanded_thrus->push_back(&expanded_thru);
+	expandThru(expanded_from, next_thru_idx + 1, expanded_thrus);
+	expanded_thrus->pop_back();
       }
     }
     if (thru->instances()) {
       for (const Instance *inst : *thru->instances()) {
-        InstanceSet insts(network_);
-        insts.insert(inst);
-        ExceptionThru expanded_thru(nullptr, nullptr, &insts, rf, false, network_);
-        expanded_thrus->push_back(&expanded_thru);
-        expandThru(expanded_from, thru_iter, expanded_thrus);
-        expanded_thrus->pop_back();
+	InstanceSet insts(network_);
+	insts.insert(inst);
+	ExceptionThru expanded_thru(nullptr, nullptr, &insts, rf, false, network_);
+	expanded_thrus->push_back(&expanded_thru);
+	expandThru(expanded_from, next_thru_idx + 1, expanded_thrus);
+	expanded_thrus->pop_back();
       }
     }
   }
@@ -2280,15 +2280,21 @@ ExceptionState::hash() const
 }
 
 bool
-ExceptionStateLess::operator()(const ExceptionState *state1,
-                               const ExceptionState *state2) const
+exceptionStateLess(const ExceptionState *state1,
+		   const ExceptionState *state2)
 {
   const ExceptionPath *except1 = state1->exception();
   const ExceptionPath *except2 = state2->exception();
-    return except1->id() < except2->id()
-  //return except1 < except2
+  return except1->id() < except2->id()
     || (except1 == except2
         && state1->index() < state2->index());
+}
+
+bool
+ExceptionStateLess::operator()(const ExceptionState *state1,
+                               const ExceptionState *state2) const
+{
+  return exceptionStateLess(state1, state2);
 }
 
 ////////////////////////////////////////////////////////////////

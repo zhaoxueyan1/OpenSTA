@@ -171,6 +171,11 @@ public:
                         // Return values.
                         Edge *&edge,
                         TimingArc *&arc);
+  void minPeriodArc(Vertex *vertex,
+		    const RiseFall *rf,
+		    // Return values.
+		    Edge *&edge,
+		    TimingArc *&arc);
   // Sdf period check annotation.
   void periodCheckAnnotation(const Pin *pin,
 			     DcalcAPIndex ap_index,
@@ -327,6 +332,7 @@ protected:
   // These fields are written by multiple threads, so they
   // cannot share the same word as the following bit fields.
   uint32_t tag_group_index_;
+  uint32_t object_idx_;
   // Each bit corresponds to a different BFS queue.
   std::atomic<uint8_t> bfs_in_queue_; // 8
 
@@ -338,7 +344,6 @@ protected:
   // This flag distinguishes the driver and load vertices.
   bool is_bidirect_drvr_:1;
 
-  unsigned object_idx_:VertexTable::idx_bits; // 7
   bool is_reg_clk_:1;
   bool is_disabled_constraint_:1;
   bool is_gated_clk_enable_:1;
@@ -416,6 +421,7 @@ protected:
                             DcalcAPIndex ap_index,
                             DcalcAPIndex ap_count,
                             bool annotated);
+  static uintptr_t arcDelayAnnotateBit(size_t index);
 
   TimingArcSet *arc_set_;
   VertexId from_;

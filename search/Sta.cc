@@ -586,6 +586,7 @@ Sta::clear()
     parasitics_->clear();
   graph_delay_calc_->clear();
   sim_->clear();
+  power_->clear();
   if (check_min_pulse_widths_)
     check_min_pulse_widths_->clear();
   if (check_min_periods_)
@@ -754,20 +755,6 @@ Sta::readLibertyAfter(LibertyLibrary *liberty,
   corner->addLiberty(liberty, min_max);
   LibertyLibrary::makeCornerMap(liberty, corner->libertyIndex(min_max),
 				network_, report_);
-}
-
-bool
-Sta::setMinLibrary(const char *min_filename,
-		   const char *max_filename)
-{
-  LibertyLibrary *max_lib = network_->findLibertyFilename(max_filename);
-  if (max_lib) {
-    LibertyLibrary *min_lib = readLibertyFile(min_filename, cmd_corner_,
-					      MinMaxAll::min(), false);
-    return min_lib != nullptr;
-  }
-  else
-    return false;
 }
 
 bool
@@ -2048,7 +2035,7 @@ Sta::checkExceptionFromPins(ExceptionFrom *from,
     PinSet::ConstIterator pin_iter(from->pins());
     while (pin_iter.hasNext()) {
       const Pin *pin = pin_iter.next();
-      if (exceptionFromInvalid(pin)) {
+      if (!sdc_->isExceptionStartpoint(pin)) {
 	if (line)
 	  report_->fileWarn(1554, file, line, "'%s' is not a valid start point.",
 			    cmd_network_->pathName(pin));
@@ -2058,24 +2045,6 @@ Sta::checkExceptionFromPins(ExceptionFrom *from,
       }
     }
   }
-}
-
-bool
-Sta::exceptionFromInvalid(const Pin *pin) const
-{
-  Net *net = network_->net(pin);
-  // Floating pins are invalid.
-  return (net == nullptr
-	  && !network_->isTopLevelPort(pin))
-    || (net
-	// Pins connected to power/ground are invalid.
-	&& (network_->isPower(net)
-            || network_->isGround(net)))
-    || !((network_->isTopLevelPort(pin)
-	  && network_->direction(pin)->isAnyInput())
-	 || network_->isRegClkPin(pin)
-	 || network_->isLatchData(pin)
-         || network_->direction(pin)->isInternal());
 }
 
 void
@@ -2124,7 +2093,7 @@ Sta::checkExceptionToPins(ExceptionTo *to,
     PinSet::Iterator pin_iter(to->pins());
     while (pin_iter.hasNext()) {
       const Pin *pin = pin_iter.next();
-      if (sdc_->exceptionToInvalid(pin)) {
+      if (!sdc_->isExceptionEndpoint(pin)) {
 	if (line)
 	  report_->fileWarn(1551, file, line, "'%s' is not a valid endpoint.",
 			    cmd_network_->pathName(pin));
@@ -2933,7 +2902,7 @@ Sta::vertexArrival(Vertex *vertex,
   while (path_iter.hasNext()) {
     Path *path = path_iter.next();
     const Arrival &path_arrival = path->arrival();
-    ClkInfo *clk_info = path->clkInfo(search_);
+    const ClkInfo *clk_info = path->clkInfo(search_);
     if ((clk_edge == clk_edge_wildcard
 	 || clk_info->clkEdge() == clk_edge)
 	&& !clk_info->isGenClkSrcPath()
@@ -3015,6 +2984,7 @@ Sta::netSlack(const Net *net,
 	slack = pin_slack;
     }
   }
+  delete pin_iter;
   return slack;
 }
 
@@ -4142,7 +4112,9 @@ Sta::replaceCell(Instance *inst,
 {
   NetworkEdit *network = networkCmdEdit();
   LibertyCell *from_lib_cell = network->libertyCell(inst);
-  if (sta::equivCells(from_lib_cell, to_lib_cell)) {
+  if (sta::equivCellsArcs(from_lib_cell, to_lib_cell)) {
+    // Replace celll optimized for less disruption to graph
+    // when ports and timing arcs are equivalent.
     replaceEquivCellBefore(inst, to_lib_cell);
     network->replaceCell(inst, to_cell);
     replaceEquivCellAfter(inst);
@@ -4458,7 +4430,7 @@ Sta::connectDrvrPinAfter(Vertex *vertex)
   graph_delay_calc_->delayInvalid(vertex);
   search_->requiredInvalid(vertex);
   search_->endpointInvalid(vertex);
-  levelize_->invalidFrom(vertex);
+  levelize_->relevelizeFrom(vertex);
   clk_network_->connectPinAfter(pin);
 }
 
@@ -4473,11 +4445,11 @@ Sta::connectLoadPinAfter(Vertex *vertex)
     graph_delay_calc_->delayInvalid(from_vertex);
     search_->requiredInvalid(from_vertex);
     sdc_->clkHpinDisablesChanged(from_vertex->pin());
+    levelize_->relevelizeFrom(from_vertex);
   }
   Pin *pin = vertex->pin();
   sdc_->clkHpinDisablesChanged(pin);
   graph_delay_calc_->delayInvalid(vertex);
-  levelize_->invalidFrom(vertex);
   search_->arrivalInvalid(vertex);
   search_->endpointInvalid(vertex);
   clk_network_->connectPinAfter(pin);
@@ -4536,7 +4508,7 @@ Sta::disconnectPinBefore(const Pin *pin)
 void
 Sta::deleteEdge(Edge *edge)
 {
-  debugPrint(debug_, "network_edit", 1, "delete edge %s -> %s",
+  debugPrint(debug_, "network_edit", 2, "delete edge %s -> %s",
              edge->from(graph_)->name(sdc_network_),
              edge->to(graph_)->name(sdc_network_));
   Vertex *to = edge->to(graph_);
@@ -4618,6 +4590,8 @@ void
 Sta::deletePinBefore(const Pin *pin)
 {
   if (graph_) {
+    debugPrint(debug_, "network_edit", 1, "delete pin %s",
+	       sdc_network_->pathName(pin));
     if (network_->isLoad(pin)) {
       Vertex *vertex = graph_->pinLoadVertex(pin);
       if (vertex) {
@@ -4635,6 +4609,7 @@ Sta::deletePinBefore(const Pin *pin)
           }
           levelize_->deleteEdgeBefore(edge);
         }
+	// Deletes edges to/from vertex also.
         graph_->deleteVertex(vertex);
       }
     }
@@ -4657,6 +4632,7 @@ Sta::deletePinBefore(const Pin *pin)
           }
           levelize_->deleteEdgeBefore(edge);
         }
+	// Deletes edges to/from vertex also.
         graph_->deleteVertex(vertex);
       }
     }
@@ -4981,9 +4957,7 @@ Sta::findFaninPins(PinSeq *to,
   ensureLevelized();
   PinSet fanin(network_);
   FaninSrchPred pred(thru_disabled, thru_constants, this);
-  PinSeq::Iterator to_iter(to);
-  while (to_iter.hasNext()) {
-    const Pin *pin = to_iter.next();
+  for (const Pin *pin : *to) {
     if (network_->isHierarchical(pin)) {
       EdgesThruHierPinIterator edge_iter(pin, network_, graph_);
       while (edge_iter.hasNext()) {
@@ -5607,14 +5581,16 @@ MinPeriodCheckSeq &
 Sta::minPeriodViolations()
 {
   minPeriodPreamble();
-  return check_min_periods_->violations();
+  const Corner *corner = cmdCorner();
+  return check_min_periods_->violations(corner);
 }
 
 MinPeriodCheck *
 Sta::minPeriodSlack()
 {
   minPeriodPreamble();
-  return check_min_periods_->minSlackCheck();
+  const Corner *corner = cmdCorner();
+  return check_min_periods_->minSlackCheck(corner);
 }
 
 void

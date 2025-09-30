@@ -26,6 +26,7 @@
 
 #include <mutex>
 #include <atomic>
+#include <functional>
 
 #include "MinMax.hh"
 #include "RiseFallMinMax.hh"
@@ -489,7 +490,6 @@ public:
   // timing arcs.
   bool hasInferedRegTimingArcs() const { return has_infered_reg_timing_arcs_; }
   TestCell *testCell() const { return test_cell_; }
-  bool isLatchData(LibertyPort *port);
   void latchEnable(const TimingArcSet *arc_set,
 		   // Return values.
 		   const LibertyPort *&enable_port,
@@ -701,6 +701,7 @@ public:
   LibertyLibrary *libertyLibrary() const { return liberty_cell_->libertyLibrary(); }
   LibertyPort *findLibertyMember(int index) const;
   LibertyPort *findLibertyBusBit(int index) const;
+  LibertyPort *bundlePort() const;
   BusDcl *busDcl() const { return bus_dcl_; }
   void setDirection(PortDirection *dir);
   ScanSignalType scanSignalType() const { return scan_signal_type_; }
@@ -740,11 +741,9 @@ public:
                           const StaState *sta) const;
   FuncExpr *function() const { return function_; }
   void setFunction(FuncExpr *func);
-  FuncExpr *&functionRef() { return function_; }
   // Tristate enable function.
   FuncExpr *tristateEnable() const { return tristate_enable_; }
   void setTristateEnable(FuncExpr *enable);
-  FuncExpr *&tristateEnableRef() { return tristate_enable_; }
   void slewLimit(const MinMax *min_max,
 		 // Return values.
 		 float &limit,
@@ -804,6 +803,10 @@ public:
   // Has register/latch rise/fall edges from pin.
   bool isRegClk() const { return is_reg_clk_; }
   void setIsRegClk(bool is_clk);
+  bool isRegOutput() const { return is_reg_output_; }
+  void setIsRegOutput(bool is_reg_out);
+  bool isLatchData() const { return is_latch_data_; }
+  void setIsLatchData(bool is_latch_data);
   // Is the clock for timing checks.
   bool isCheckClk() const { return is_check_clk_; }
   void setIsCheckClk(bool is_clk);
@@ -871,6 +874,16 @@ protected:
   void addScaledPort(OperatingConditions *op_cond,
 		     LibertyPort *scaled_port);
   RiseFallMinMax clkTreeDelays1() const;
+  void setMemberFlag(bool value,
+		     const std::function<void(LibertyPort*, bool)> &setter);
+  void setMemberFloat(float value,
+		      const std::function<void(LibertyPort*, float)> &setter);
+  void setMemberMinMaxFloat(float value,
+			    const MinMax *min_max,
+			    const std::function<void(LibertyPort*,
+						     float,
+						     const MinMax *)> &setter);
+
 
   LibertyCell *liberty_cell_;
   BusDcl *bus_dcl_;
@@ -900,6 +913,8 @@ protected:
   bool min_period_exists_:1;
   bool is_clk_:1;
   bool is_reg_clk_:1;
+  bool is_reg_output_:1;
+  bool is_latch_data_: 1;
   bool is_check_clk_:1;
   bool is_clk_gate_clk_:1;
   bool is_clk_gate_enable_:1;
@@ -1046,7 +1061,7 @@ public:
   ~ModeValueDef();
   const char *value() const { return value_.c_str(); }
   FuncExpr *cond() const { return cond_; }
-  FuncExpr *&condRef() { return cond_; }
+  void setCond(FuncExpr *cond);
   const char *sdfCond() const { return sdf_cond_.c_str(); }
   void setSdfCond(const char *sdf_cond);
 
