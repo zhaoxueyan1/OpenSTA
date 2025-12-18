@@ -166,8 +166,10 @@ ClkInfo::to_string(const StaState *sta) const
     const Pin *crpr_clk_pin = crpr_clk_path_.vertex(sta)->pin();
     result += " crpr ";
     result += network->pathName(crpr_clk_pin);
-    result += "/";
+    result += " ";
     result += std::to_string(crpr_clk_path_.tag(sta)->index());
+    result += "/";
+    result += crpr_clk_path_.minMax(sta)->to_string();
   }
 
   if (is_gen_clk_src_path_)
@@ -177,9 +179,9 @@ ClkInfo::to_string(const StaState *sta) const
     result += network->pathName(gen_clk_src_);
   }
 
-  if (insertion_ > 0.0) {
+  if (delayGreater(insertion_, 0.0, sta)) {
     result += " insert";
-    result += std::to_string(insertion_);
+    result += delayAsString(insertion_, sta);
   }
 
   if (uncertainties_) {

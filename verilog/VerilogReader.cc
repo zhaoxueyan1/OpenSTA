@@ -146,8 +146,8 @@ VerilogReader::VerilogReader(NetworkReader *network) :
   zero_net_name_("zero_"),
   one_net_name_("one_")
 {
-  network->setLinkFunc([=] (const char *top_cell_name,
-                            bool make_black_boxes) -> Instance* {
+  network->setLinkFunc([this] (const char *top_cell_name,
+                               bool make_black_boxes) -> Instance* {
     return linkNetwork(top_cell_name, make_black_boxes, true);
   });
   constant10_max_ = stdstrPrint("%llu", std::numeric_limits<VerilogConstant10>::max());
@@ -534,7 +534,7 @@ VerilogReader::makeModuleInst(const string *module_vname,
   // to reduce the memory footprint of the verilog parser.
   if (liberty_cell
       && hasScalarNamedPortRefs(liberty_cell, pins)) {
-    int port_count = network_->portBitCount(cell);
+    const int port_count = liberty_cell->portBitCount();
     StdStringSeq net_names(port_count);
     for (VerilogNet *vnet : *pins) {
       VerilogNetPortRefScalarNet *vpin =
@@ -1900,19 +1900,11 @@ VerilogReader::makeNamedInstPins(Cell *cell,
 	delete net_name_iter;
       }
     }
-    else {
-      LibertyPgPort *pg_port = nullptr;
-      LibertyCell *lib_cell = network_->libertyCell(cell);
-      if (lib_cell)
-        pg_port = lib_cell->findPgPort(port_name);
-      // Do not warn about connections to pg ports (which are ignored).
-      if (pg_port == nullptr) {
-        linkWarn(201, parent_module->filename(), mod_inst->line(),
-                 "instance %s port %s not found.",
-                 inst_vname.c_str(),
-                 port_name);
-      }
-    }
+    else
+      linkWarn(201, parent_module->filename(), mod_inst->line(),
+	       "instance %s port %s not found.",
+	       inst_vname.c_str(),
+	       port_name);
   }
 }
 

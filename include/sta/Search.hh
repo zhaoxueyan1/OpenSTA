@@ -71,6 +71,8 @@ typedef Map<Vertex*, Slack> VertexSlackMap;
 typedef Vector<VertexSlackMap> VertexSlackMapSeq;
 typedef Vector<WorstSlacks> WorstSlacksSeq;
 typedef std::vector<DelayDbl> DelayDblSeq;
+typedef Vector<ExceptionPath*> ExceptionPathSeq;
+typedef std::vector<PathGroup*> PathGroupSeq;
 
 class Search : public StaState
 {
@@ -103,6 +105,7 @@ public:
                           size_t group_path_count,
                           size_t endpoint_path_count,
                           bool unique_pins,
+                          bool unique_edges,
                           float slack_min,
                           float slack_max,
                           bool sort_by_slack,
@@ -165,11 +168,12 @@ public:
   // Clock arrival at the path source/launch point.
   Arrival pathClkPathArrival(const Path *path) const;
 
-  PathGroup *pathGroup(const PathEnd *path_end) const;
+  PathGroupSeq pathGroups(const PathEnd *path_end) const;
   void deletePathGroups();
   void makePathGroups(int group_path_count,
                       int endpoint_path_count,
                       bool unique_pins,
+                      bool unique_edges,
                       float min_slack,
                       float max_slack,
                       PathGroupNameSet *group_names,
@@ -187,6 +191,7 @@ public:
 				     const MinMax *min_max,
 				     bool match_min_max_exactly,
 				     bool require_to_pin) const;
+  ExceptionPathSeq groupPathsTo(const PathEnd *path_end) const;
   FilterPath *filter() const { return filter_; }
   void deleteFilter();
   void deleteFilteredArrivals();
@@ -253,7 +258,8 @@ public:
                Edge *edge,
                const RiseFall *to_rf,
                const MinMax *min_max,
-               const PathAnalysisPt *path_ap);
+               const PathAnalysisPt *path_ap,
+               TagSet *tag_cache);
   Tag *thruClkTag(Path *from_path,
                   Vertex *from_vertex,
                   Tag *from_tag,
@@ -288,6 +294,7 @@ public:
   BfsFwdIterator *arrivalIterator() const { return arrival_iter_; }
   BfsBkwdIterator *requiredIterator() const { return required_iter_; }
   bool arrivalsAtEndpointsExist()const{return arrivals_at_endpoints_exist_;}
+  // Used by OpenROAD.
   bool makeUnclkedPaths(Vertex *vertex,
 			bool is_segment_start,
                         bool require_exception,
@@ -300,6 +307,7 @@ public:
 			       Vertex *vertex,
 			       TagGroupBldr *tag_bldr);
   void enqueueLatchDataOutputs(Vertex *vertex);
+  void enqueueLatchOutput(Vertex *vertex);
   virtual void seedRequired(Vertex *vertex);
   virtual void seedRequiredEnqueueFanin(Vertex *vertex);
   void seedInputDelayArrival(const Pin *pin,
@@ -322,13 +330,14 @@ public:
 			 const RiseFall *to_rf);
 
   Tag *findTag(const RiseFall *rf,
-	       const PathAnalysisPt *path_ap,
-	       const ClkInfo *tag_clk,
-	       bool is_clk,
-	       InputDelay *input_delay,
-	       bool is_segment_start,
-	       ExceptionStateSet *states,
-	       bool own_states);
+               const PathAnalysisPt *path_ap,
+               const ClkInfo *tag_clk,
+               bool is_clk,
+               InputDelay *input_delay,
+               bool is_segment_start,
+               ExceptionStateSet *states,
+               bool own_states,
+               TagSet *tag_cache);
   void reportTags() const;
   void reportClkInfos() const;
   const ClkInfo *findClkInfo(const ClockEdge *clk_edge,
@@ -409,6 +418,7 @@ public:
   void checkPrevPaths() const;
   void deletePaths(Vertex *vertex);
   void deleteTagGroup(TagGroup *group);
+  bool postpone_latch_outputs_;
 
 protected:
   void init(StaState *sta);
@@ -512,19 +522,20 @@ protected:
   void findAllArrivals(bool thru_latches);
   void findArrivals1(Level level);
   Tag *mutateTag(Tag *from_tag,
-		 const Pin *from_pin,
-		 const RiseFall *from_rf,
-		 bool from_is_clk,
-		 const ClkInfo *from_clk_info,
-		 const Pin *to_pin,
-		 const RiseFall *to_rf,
-		 bool to_is_clk,
-		 bool to_is_reg_clk,
-		 bool to_is_segment_start,
-		 const ClkInfo *to_clk_info,
-		 InputDelay *to_input_delay,
-		 const MinMax *min_max,
-		 const PathAnalysisPt *path_ap);
+                 const Pin *from_pin,
+                 const RiseFall *from_rf,
+                 bool from_is_clk,
+                 const ClkInfo *from_clk_info,
+                 const Pin *to_pin,
+                 const RiseFall *to_rf,
+                 bool to_is_clk,
+                 bool to_is_reg_clk,
+                 bool to_is_segment_start,
+                 const ClkInfo *to_clk_info,
+                 InputDelay *to_input_delay,
+                 const MinMax *min_max,
+                 const PathAnalysisPt *path_ap,
+                 TagSet *tag_cache);
   ExceptionPath *exceptionTo(const Path *path,
 			     const Pin *pin,
 			     const RiseFall *rf,
@@ -698,9 +709,11 @@ class PathVisitor : public VertexVisitor, public StaState
 {
 public:
   // Uses search->evalPred() for search predicate.
-  explicit PathVisitor(const StaState *sta);
+  PathVisitor(const StaState *sta);
   PathVisitor(SearchPred *pred,
+	      bool make_tag_cache,
 	      const StaState *sta);
+  virtual ~PathVisitor();
   virtual void visitFaninPaths(Vertex *to_vertex);
   virtual void visitFanoutPaths(Vertex *from_vertex);
 
@@ -749,6 +762,7 @@ protected:
 			       const MinMax *min_max,
 			       const PathAnalysisPt *path_ap) = 0;
   SearchPred *pred_;
+  TagSet *tag_cache_;
 };
 
 // Visitor called during forward search to record an
@@ -756,7 +770,7 @@ protected:
 class ArrivalVisitor : public PathVisitor
 {
 public:
-  explicit ArrivalVisitor(const StaState *sta);
+  ArrivalVisitor(const StaState *sta);
   virtual ~ArrivalVisitor();
   // Initialize the visitor.
   // Defaults pred to search->eval_pred_.
@@ -830,12 +844,14 @@ protected:
 class RequiredVisitor : public PathVisitor
 {
 public:
-  explicit RequiredVisitor(const StaState *sta);
+  RequiredVisitor(const StaState *sta);
   virtual ~RequiredVisitor();
   virtual VertexVisitor *copy() const;
   virtual void visit(Vertex *vertex);
 
 protected:
+  RequiredVisitor(bool make_tag_cache,
+		  const StaState *sta);
   // Return false to stop visiting.
   virtual bool visitFromToPath(const Pin *from_pin,
 			       Vertex *from_vertex,

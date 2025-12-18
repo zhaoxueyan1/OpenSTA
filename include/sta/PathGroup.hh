@@ -40,6 +40,8 @@ class PathEndVisitor;
 typedef PathEndSeq::Iterator PathGroupIterator;
 typedef Map<const Clock*, PathGroup*> PathGroupClkMap;
 typedef Map<const char*, PathGroup*, CharPtrLess> PathGroupNamedMap;
+typedef std::vector<PathGroup*> PathGroupSeq;
+typedef std::vector<std::string> StdStringSeq;
 
 // A collection of PathEnds grouped and sorted for reporting.
 class PathGroup
@@ -51,6 +53,7 @@ public:
 					 int group_path_count,
 					 int endpoint_path_count,
 					 bool unique_pins,
+					 bool unique_edges,
 					 const MinMax *min_max,
 					 const StaState *sta);
   // Path group that compares arrival time, sorted by min_max.
@@ -58,6 +61,7 @@ public:
 				       int group_path_count,
 				       int endpoint_path_count,
 				       bool unique_pins,
+				       bool unique_edges,
 				       float min_slack,
 				       float max_slack,
 				       const StaState *sta);
@@ -81,6 +85,7 @@ protected:
 	    size_t group_path_count,
 	    size_t endpoint_path_count,
 	    bool unique_pins,
+	    bool unique_edges,
 	    float min_slack,
 	    float max_slack,
 	    bool cmp_slack,
@@ -94,6 +99,7 @@ protected:
   size_t group_path_count_;
   size_t endpoint_path_count_;
   bool unique_pins_;
+  bool unique_edges_;
   float slack_min_;
   float slack_max_;
   PathEndSeq path_ends_;
@@ -110,6 +116,7 @@ public:
   PathGroups(int group_path_count,
 	     int endpoint_path_count,
 	     bool unique_pins,
+	     bool unique_edges,
 	     float slack_min,
 	     float slack_max,
 	     PathGroupNameSet *group_names,
@@ -133,15 +140,20 @@ public:
 			   const MinMax *min_max) const;
   PathGroup *findPathGroup(const Clock *clock,
 			   const MinMax *min_max) const;
-  PathGroup *pathGroup(const PathEnd *path_end) const;
-  static bool isGroupPathName(const char *group_name);
+  PathGroupSeq pathGroups(const PathEnd *path_end) const;
+  static StdStringSeq pathGroupNames(const PathEnd *path_end,
+				     const StaState *sta);
   static const char *asyncPathGroupName() { return async_group_name_; }
+  static const char *pathDelayGroupName() { return  path_delay_group_name_; }
+  static const char *gatedClkGroupName() { return gated_clk_group_name_; }
+  static const char *unconstrainedGroupName() { return unconstrained_group_name_; }
 
 protected:
   void makeGroupPathEnds(ExceptionTo *to,
 			 int group_path_count,
 			 int endpoint_path_count,
 			 bool unique_pins,
+			 bool unique_edges,
 			 const Corner *corner,
 			 const MinMaxAll *min_max);
   void makeGroupPathEnds(ExceptionTo *to,
@@ -156,6 +168,7 @@ protected:
 		    int group_path_count,
 		    int endpoint_path_count,
 		    bool unique_pins,
+		    bool unique_edges,
 		    bool cmp_slack);
 
   void pushGroupPathEnds(PathEndSeq &path_ends);
@@ -165,6 +178,7 @@ protected:
   void makeGroups(int group_path_count,
 		  int endpoint_path_count,
 		  bool unique_pins,
+		  bool unique_edges,
 		  float slack_min,
 		  float slack_max,
 		  PathGroupNameSet *group_names,
@@ -175,11 +189,11 @@ protected:
 		  const MinMax *min_max);
   bool reportGroup(const char *group_name,
 		   PathGroupNameSet *group_names) const;
-  GroupPath *groupPathTo(const PathEnd *path_end) const;
 
   int group_path_count_;
   int endpoint_path_count_;
   bool unique_pins_;
+  bool unique_edges_;
   float slack_min_;
   float slack_max_;
 

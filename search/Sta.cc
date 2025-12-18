@@ -75,7 +75,6 @@
 #include "ClkLatency.hh"
 #include "FindRegister.hh"
 #include "ReportPath.hh"
-#include "VisitPathGroupVertices.hh"
 #include "Genclks.hh"
 #include "ClkNetwork.hh"
 #include "power/Power.hh"
@@ -1133,6 +1132,7 @@ Sta::makeClock(const char *name,
   sdc_->makeClock(name, pins, add_to_pins, period, waveform, comment);
   update_genclks_ = true;
   search_->arrivalsInvalid();
+  power_->activitiesInvalid();
 }
 
 void
@@ -1157,6 +1157,7 @@ Sta::makeGeneratedClock(const char *name,
 			   edges, edge_shifts, comment);
   update_genclks_ = true;
   search_->arrivalsInvalid();
+  power_->activitiesInvalid();
 }
 
 void
@@ -1164,6 +1165,7 @@ Sta::removeClock(Clock *clk)
 {
   sdc_->removeClock(clk);
   search_->arrivalsInvalid();
+  power_->activitiesInvalid();
 }
 
 bool
@@ -1841,6 +1843,7 @@ Sta::setLogicValue(Pin *pin,
   sdc_->setLogicValue(pin, value);
   // Levelization respects constant disabled edges.
   levelize_->invalid();
+  power_->activitiesInvalid();
   sim_->constantsInvalid();
   // Constants disable edges which isolate downstream vertices of the
   // graph from the delay calculator's BFS search.  This means that
@@ -1856,6 +1859,7 @@ Sta::setCaseAnalysis(Pin *pin,
 		     LogicValue value)
 {
   sdc_->setCaseAnalysis(pin, value);
+  power_->activitiesInvalid();
   // Levelization respects constant disabled edges.
   levelize_->invalid();
   sim_->constantsInvalid();
@@ -2011,9 +2015,35 @@ Sta::makeGroupPath(const char *name,
 bool
 Sta::isGroupPathName(const char *group_name)
 {
-  return PathGroups::isGroupPathName(group_name)
-    || sdc_->findClock(group_name)
-    || sdc_->isGroupPathName(group_name);
+  return isPathGroupName(group_name);
+}
+
+bool
+Sta::isPathGroupName(const char *group_name) const
+{
+  return sdc_->findClock(group_name)
+    || sdc_->isGroupPathName(group_name)
+    || stringEq(group_name, PathGroups::asyncPathGroupName())
+    || stringEq(group_name, PathGroups::pathDelayGroupName())
+    || stringEq(group_name, PathGroups::gatedClkGroupName())
+    || stringEq(group_name, PathGroups::unconstrainedGroupName());
+}
+
+StdStringSeq
+Sta::pathGroupNames() const
+{
+  StdStringSeq names;
+  for (const Clock *clk : *sdc_->clocks())
+    names.push_back(clk->name());
+
+  for (auto const &[name, group] : sdc_->groupPaths())
+    names.push_back(name);
+
+  names.push_back(PathGroups::asyncPathGroupName());
+  names.push_back(PathGroups::pathDelayGroupName());
+  names.push_back(PathGroups::gatedClkGroupName());
+  names.push_back(PathGroups::unconstrainedGroupName());
+  return names;
 }
 
 ExceptionFrom *
@@ -2459,6 +2489,7 @@ Sta::findPathEnds(ExceptionFrom *from,
 		  int group_path_count,
 		  int endpoint_path_count,
 		  bool unique_pins,
+		  bool unique_edges,
 		  float slack_min,
 		  float slack_max,
 		  bool sort_by_slack,
@@ -2472,8 +2503,10 @@ Sta::findPathEnds(ExceptionFrom *from,
 {
   searchPreamble();
   return search_->findPathEnds(from, thrus, to, unconstrained,
-			       corner, min_max, group_path_count, endpoint_path_count,
-			       unique_pins, slack_min, slack_max,
+			       corner, min_max, group_path_count,
+			       endpoint_path_count,
+			       unique_pins, unique_edges,
+			       slack_min, slack_max,
 			       sort_by_slack, group_names,
 			       setup, hold,
 			       recovery, removal,
@@ -2711,34 +2744,6 @@ Sta::endpointViolationCount(const MinMax *min_max)
       violations++;
   }
   return violations;
-}
-
-PinSet
-Sta::findGroupPathPins(const char *group_path_name)
-{
-  if (!(search_->havePathGroups()
-        && search_->arrivalsValid())) {
-    PathEndSeq path_ends = findPathEnds(// from, thrus, to, unconstrained
-                                        nullptr, nullptr, nullptr, false,
-                                        // corner, min_max, 
-                                        nullptr, MinMaxAll::max(),
-                                        // group_path_count, endpoint_path_count, unique_pins
-                                        1, 1, false,
-                                        -INF, INF, // slack_min, slack_max,
-                                        false, // sort_by_slack
-                                        nullptr, // group_names
-                                        // setup, hold, recovery, removal, 
-                                        true, true, true, true,
-                                        // clk_gating_setup, clk_gating_hold
-                                        true, true);
-  }
-
-  PathGroup *path_group = search_->findPathGroup(group_path_name,
-						 MinMax::max());
-  PinSet pins(network_);
-  VertexPinCollector visitor(pins);
-  visitPathGroupVertices(path_group, &visitor, this);
-  return pins;
 }
 
 ////////////////////////////////////////////////////////////////
@@ -3025,13 +3030,82 @@ Sta::pinSlack(const Pin *pin,
   return slack;
 }
 
+////////////////////////////////////////////////////////////////
+
+class EndpointPathEndVisitor : public PathEndVisitor
+{
+public:
+  EndpointPathEndVisitor(const std::string &path_group_name,
+			 const MinMax *min_max,
+			 const StaState *sta);
+  PathEndVisitor *copy() const;
+  void visit(PathEnd *path_end);
+  Slack slack() const { return slack_; }
+
+private:
+  const std::string &path_group_name_;
+  const MinMax *min_max_;
+  Slack slack_;
+  const StaState *sta_;
+};
+
+EndpointPathEndVisitor::EndpointPathEndVisitor(const std::string &path_group_name,
+					       const MinMax *min_max,
+					       const StaState *sta) :
+  path_group_name_(path_group_name),
+  min_max_(min_max),
+  slack_(MinMax::min()->initValue()),
+  sta_(sta)
+{
+}
+
+PathEndVisitor *
+EndpointPathEndVisitor::copy() const
+{
+  return new EndpointPathEndVisitor(path_group_name_, min_max_, sta_);
+}
+
+void
+EndpointPathEndVisitor::visit(PathEnd *path_end)
+{
+  if (path_end->minMax(sta_) == min_max_) {
+    StdStringSeq group_names = PathGroups::pathGroupNames(path_end, sta_);
+    for (std::string &group_name : group_names) {
+      if (group_name == path_group_name_) {
+	Slack end_slack = path_end->slack(sta_);
+	if (delayLess(end_slack, slack_, sta_))
+	  slack_ = end_slack;
+      }
+    }
+  }
+}
+
+Slack
+Sta::endpointSlack(const Pin *pin,
+		   const std::string &path_group_name,
+		   const MinMax *min_max)
+{
+  ensureGraph();
+  Vertex *vertex = graph_->pinLoadVertex(pin);
+  if (vertex) {
+    findRequired(vertex);
+    VisitPathEnds visit_ends(this);
+    EndpointPathEndVisitor path_end_visitor(path_group_name, min_max, this);
+    visit_ends.visitPathEnds(vertex, &path_end_visitor);
+    return path_end_visitor.slack();
+  }
+  else
+    return INF;
+}
+
+////////////////////////////////////////////////////////////////
+
 Slack
 Sta::vertexSlack(Vertex *vertex,
 		 const MinMax *min_max)
 {
   findRequired(vertex);
-  const MinMax *min = MinMax::min();
-  Slack slack = min->initValue();
+  Slack slack = MinMax::min()->initValue();
   VertexPathIterator path_iter(vertex, this);
   while (path_iter.hasNext()) {
     Path *path = path_iter.next();
@@ -3217,46 +3291,12 @@ Sta::findRequired(Vertex *vertex)
 {
   searchPreamble();
   search_->findAllArrivals();
-  search_->findRequireds(vertex->level());
-  if (variables_->crprEnabled()
-      && search_->crprPathPruningEnabled()
-      && !search_->crprApproxMissingRequireds()
-      // Clocks invariably have requireds that are pruned but it isn't
-      // worth finding arrivals and requireds all over again for
-      // the entire fanout of the clock.
-      && !search_->isClock(vertex)) {
-    // Invalidate arrivals and requireds and disable
-    // path pruning on fanout vertices with DFS.
-    int fanout = 0;
-    disableFanoutCrprPruning(vertex, fanout);
-    debugPrint(debug_, "search", 1, "resurrect pruned required %s fanout %d",
-               vertex->to_string(this).c_str(),
-               fanout);
-    // Find fanout arrivals and requireds with pruning disabled.
-    search_->findArrivals();
+  if (search_->isEndpoint(vertex)
+      // Need to include downstream required times if there is fanout.
+      && !hasFanout(vertex, search_->searchAdj(), graph_))
+    search_->seedRequired(vertex);
+  else
     search_->findRequireds(vertex->level());
-  }
-}
-
-void
-Sta::disableFanoutCrprPruning(Vertex *vertex,
-			      int &fanout)
-{
-  if (!vertex->crprPathPruningDisabled()) {
-    search_->arrivalInvalid(vertex);
-    search_->requiredInvalid(vertex);
-    vertex->setCrprPathPruningDisabled(true);
-    fanout++;
-    SearchPred *pred = search_->searchAdj();
-    VertexOutEdgeIterator edge_iter(vertex, graph_);
-    while (edge_iter.hasNext()) {
-      Edge *edge = edge_iter.next();
-      Vertex *to_vertex = edge->to(graph_);
-      if (pred->searchThru(edge)
-	  && pred->searchTo(to_vertex))
-	disableFanoutCrprPruning(to_vertex, fanout);
-    }
-  }
 }
 
 Slack
@@ -4258,7 +4298,8 @@ Sta::replaceEquivCellBefore(const Instance *inst,
         else {
           // Force delay calculation on output pins.
           Vertex *vertex = graph_->pinDrvrVertex(pin);
-          graph_delay_calc_->delayInvalid(vertex);
+	  if (vertex)
+	    graph_delay_calc_->delayInvalid(vertex);
         }
       }
     }
@@ -4462,7 +4503,6 @@ Sta::disconnectPinBefore(const Pin *pin)
              sdc_network_->pathName(pin),
              sdc_network_->pathName(network_->net(pin)));
   parasitics_->disconnectPinBefore(pin, network_);
-  sdc_->disconnectPinBefore(pin);
   sim_->disconnectPinBefore(pin);
   if (graph_) {
     if (network_->isDriver(pin)) {
@@ -4573,6 +4613,7 @@ Sta::deleteLeafInstanceBefore(const Instance *inst)
 {
   sim_->deleteInstanceBefore(inst);
   sdc_->deleteInstanceBefore(inst);
+  power_->deleteInstanceBefore(inst);
 }
 
 void
@@ -4647,8 +4688,10 @@ Sta::deletePinBefore(const Pin *pin)
       }
     }
   }
+  sdc_->deletePinBefore(pin);
   sim_->deletePinBefore(pin);
   clk_network_->deletePinBefore(pin);
+  power_->deletePinBefore(pin);
 }
 
 void
@@ -5219,8 +5262,8 @@ Sta::slowDrivers(int count)
 {
   findDelays();
   InstanceSeq insts = network_->leafInstances();
-  sort(insts, [=] (const Instance *inst1,
-                   const Instance *inst2) {
+  sort(insts, [this] (const Instance *inst1,
+                      const Instance *inst2) {
     return delayGreater(instMaxSlew(inst1, this),
                         instMaxSlew(inst2, this),
                         this);

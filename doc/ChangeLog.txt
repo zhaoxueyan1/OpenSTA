@@ -12,6 +12,13 @@ build directory instead of `app/`.
 The set_max_delay and set_min_delay commands now support the -probe option.
 With -probe these commands do not break paths at internal (non-startpoint) pins.
 
+The report_checks command now supports a -unique_edges_to_endpoint option
+to remove paths through identical pins and rise/fall edges.
+
+  report_checks [-unique_edges_to_endpoint]
+
+Instances now have pins for verilog netlist power/ground connections,
+
 Release 2.6.1 2025/03/30
 -------------------------
 

@@ -73,6 +73,7 @@ typedef InstanceSeq::Iterator SlowDrvrIterator;
 typedef Vector<const char*> CheckError;
 typedef Vector<CheckError*> CheckErrorSeq;
 typedef Vector<Corner*> CornerSeq;
+typedef std::vector<std::string> StdStringSeq;
 
 enum class CmdNamespace { sta, sdc };
 
@@ -516,7 +517,10 @@ public:
 		     ExceptionThruSeq *thrus,
 		     ExceptionTo *to,
 		     const char *comment);
-  bool isGroupPathName(const char *group_name);
+  // Deprecated 10/24/2025
+  bool isGroupPathName(const char *group_name) __attribute__ ((deprecated));
+  bool isPathGroupName(const char *group_name) const;
+  StdStringSeq pathGroupNames() const;
   void resetPath(ExceptionFrom *from,
 		 ExceptionThruSeq *thrus,
 		 ExceptionTo *to,
@@ -817,9 +821,12 @@ public:
                                   // Number of paths to report for
                                   // each endpoint.
                                   int endpoint_path_count,
-                                  // endpoint_path_count paths report unique pins
-                                  // without rise/fall variations.
+                                  // endpoint_path_count paths report paths with
+				  // unique pins.
                                   bool unique_pins,
+                                  // endpoint_path_count paths report paths with
+				  // unique pins and rise/fall edges.
+				  bool unique_edges,
                                   // Min/max bounds for slack of
                                   // returned path ends.
                                   float slack_min,
@@ -900,9 +907,6 @@ public:
   PinSet endpointPins();
   VertexSet *endpoints();
   int endpointViolationCount(const MinMax *min_max);
-  // Find the fanin vertices for a group path.
-  // Vertices in the clock network are NOT included.
-  PinSet findGroupPathPins(const char *group_path_name);
   // Find all required times after updateTiming().
   void findRequireds();
   std::string reportDelayCalc(Edge *edge,
@@ -1002,6 +1006,10 @@ public:
 		 const MinMax *min_max);
   Slack pinSlack(const Pin *pin,
 		 const MinMax *min_max);
+  // Worst slack for an endpoint in a path group.
+  Slack endpointSlack(const Pin *pin,
+		      const std::string &path_group_name,
+		      const MinMax *min_max);
   Slack vertexSlack(Vertex *vertex,
 		    const MinMax *min_max);
   Slack vertexSlack(Vertex *vertex,
@@ -1438,8 +1446,6 @@ protected:
 			Corner *corner,
 			const MinMax *min_max);
   void powerPreamble();
-  void disableFanoutCrprPruning(Vertex *vertex,
-				int &fanou);
   virtual void replaceCell(Instance *inst,
                            Cell *to_cell,
                            LibertyCell *to_lib_cell);
