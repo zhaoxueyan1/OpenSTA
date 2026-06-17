@@ -1,5 +1,5 @@
 // OpenSTA, Static Timing Analyzer
-// Copyright (c) 2025, Parallax Software, Inc.
+// Copyright (c) 2026, Parallax Software, Inc.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -22,9 +22,8 @@
 // 
 // This notice may not be removed or altered from any source distribution.
 
-%module liberty
-
 %{
+#include "PatternMatch.hh"
 #include "PortDirection.hh"
 #include "Liberty.hh"
 #include "EquivCells.hh"
@@ -116,12 +115,12 @@ private:
 
 bool
 read_liberty_cmd(char *filename,
-		 Corner *corner,
-		 const MinMaxAll *min_max,
-		 bool infer_latches)
+                 Scene *scene,
+                 const MinMaxAll *min_max,
+                 bool infer_latches)
 {
   Sta *sta = Sta::sta();
-  LibertyLibrary *lib = sta->readLiberty(filename, corner, min_max, infer_latches);
+  LibertyLibrary *lib = sta->readLiberty(filename, scene, min_max, infer_latches);
   return (lib != nullptr);
 }
 
@@ -148,21 +147,21 @@ find_equiv_cells(LibertyCell *cell)
 
 bool
 equiv_cells(LibertyCell *cell1,
-	    LibertyCell *cell2)
+            LibertyCell *cell2)
 {
   return sta::equivCells(cell1, cell2);
 }
 
 bool
 equiv_cell_ports(LibertyCell *cell1,
-		 LibertyCell *cell2)
+                 LibertyCell *cell2)
 {
   return equivCellPorts(cell1, cell2);
 }
 
 bool
 equiv_cell_timing_arcs(LibertyCell *cell1,
-		       LibertyCell *cell2)
+                       LibertyCell *cell2)
 {
   return equivCellTimingArcSets(cell1, cell2);
 }
@@ -173,12 +172,12 @@ find_library_buffers(LibertyLibrary *library)
   return library->buffers();
 }
 
-const char *
+std::string_view
 liberty_port_direction(const LibertyPort *port)
 {
   return port->direction()->name();
 }
-	     
+             
 bool
 liberty_supply_exists(const char *supply_name)
 {
@@ -220,7 +219,7 @@ timing_role_is_check(const TimingRole *role)
 ////////////////////////////////////////////////////////////////
 
 %extend LibertyLibrary {
-const char *name() { return self->name(); }
+const char *name() { return self->name().c_str(); }
 
 LibertyCell *
 find_liberty_cell(const char *name)
@@ -230,20 +229,20 @@ find_liberty_cell(const char *name)
 
 LibertyCellSeq
 find_liberty_cells_matching(const char *pattern,
-			    bool regexp,
-			    bool nocase)
+                            bool regexp,
+                            bool nocase)
 {
   PatternMatch matcher(pattern, regexp, nocase, Sta::sta()->tclInterp());
   return self->findLibertyCellsMatching(&matcher);
 }
 
-Wireload *
+const Wireload *
 find_wireload(const char *model_name)
 {
   return self->findWireload(model_name);
 }
 
-WireloadSelection *
+const WireloadSelection *
 find_wireload_selection(const char *selection_name)
 {
   return self->findWireloadSelection(selection_name);
@@ -264,7 +263,7 @@ default_operating_conditions()
 } // LibertyLibrary methods
 
 %extend LibertyCell {
-const char *name() { return self->name(); }
+const char *name() { return self->name().c_str(); }
 bool is_leaf() { return self->isLeaf(); }
 bool is_buffer() { return self->isBuffer(); }
 bool is_inverter() { return self->isInverter(); }
@@ -278,8 +277,8 @@ find_liberty_port(const char *name)
 
 LibertyPortSeq
 find_liberty_ports_matching(const char *pattern,
-			    bool regexp,
-			    bool nocase)
+                            bool regexp,
+                            bool nocase)
 {
   PatternMatch matcher(pattern, regexp, nocase, Sta::sta()->tclInterp());
   return self->findLibertyPortsMatching(&matcher);
@@ -297,9 +296,8 @@ timing_arc_sets()
 void
 ensure_voltage_waveforms()
 {
-  Corners *corners = Sta::sta()->corners();
-  const DcalcAnalysisPtSeq &dcalc_aps = corners->dcalcAnalysisPts();
-  self->ensureVoltageWaveforms(dcalc_aps);
+  const SceneSeq &scenes = Sta::sta()->scenes();
+  self->ensureVoltageWaveforms(scenes);
 }
 
 LibertyCell *test_cell() { return self->testCell(); }
@@ -307,7 +305,8 @@ LibertyCell *test_cell() { return self->testCell(); }
 } // LibertyCell methods
 
 %extend LibertyPort {
-const char *bus_name() { return self->busName(); }
+const char *name() { return self->name().c_str(); }
+std::string bus_name() { return self->busName(); }
 Cell *cell() { return self->cell(); }
 bool is_bus() { return self->isBus(); }
 bool is_bus_bit() { return self->isBusBit(); }
@@ -316,10 +315,9 @@ bool is_bundle_member() { return self->isBundleMember(); }
 bool has_members() { return self->hasMembers(); }
 LibertyPortMemberIterator *
 member_iterator() { return new LibertyPortMemberIterator(self); }
-LibertyPort *bundle_port() { return self->bundlePort(); }
 bool is_pwr_gnd() { return self->isPwrGnd(); }
 
-string
+std::string
 function()
 {
   FuncExpr *func = self->function();
@@ -329,7 +327,7 @@ function()
     return "";
 }
 
-string
+std::string
 tristate_enable()
 {
   FuncExpr *enable = self->tristateEnable();
@@ -340,11 +338,11 @@ tristate_enable()
 }
 
 float
-capacitance(Corner *corner,
-	    const MinMax *min_max)
+capacitance(Scene *scene,
+            const MinMax *min_max)
 {
   Sta *sta = Sta::sta();
-  return sta->capacitance(self, corner, min_max);
+  return sta->capacitance(self, scene, min_max);
 }
 
 void
@@ -356,7 +354,7 @@ set_direction(const char *dir)
 const char *
 scan_signal_type()
 {
-  return scanSignalTypeName(self->scanSignalType());
+  return scanSignalTypeName(self->scanSignalType()).c_str();
 }
 
 } // LibertyPort methods
@@ -364,19 +362,27 @@ scan_signal_type()
 %extend TimingArcSet {
 LibertyPort *from() { return self->from(); }
 LibertyPort *to() { return self->to(); }
+std::string to_string() { return self->to_string(); }
 const TimingRole *role() { return self->role(); }
-const char *sdf_cond() { return self->sdfCond(); }
+const char *sdf_cond() { return self->sdfCond().c_str(); }
 
-const char *
+std::string
 full_name()
 {
-  const char *from = self->from()->name();
-  const char *to = self->to()->name();
-  const char *cell_name = self->libertyCell()->name();
-  return stringPrintTmp("%s %s -> %s",
-			cell_name,
-			from,
-			to);
+  return sta::format("{} {} -> {}",
+                     self->libertyCell()->name(),
+                     self->from()->name(),
+                     self->to()->name());
+}
+
+const std::string
+when()
+{
+  const FuncExpr *when = self->when();
+  if (when)
+    return when->to_string();
+  else
+    return "";
 }
 
 TimingArcSeq &
@@ -388,9 +394,9 @@ timing_arcs() { return self->arcs(); }
 LibertyPort *from() { return self->from(); }
 LibertyPort *to() { return self->to(); }
 const Transition *from_edge() { return self->fromEdge(); }
-const char *from_edge_name() { return self->fromEdge()->asRiseFall()->name(); }
+const char *from_edge_name() { return self->fromEdge()->asRiseFall()->name().c_str(); }
 const Transition *to_edge() { return self->toEdge(); }
-const char *to_edge_name() { return self->toEdge()->asRiseFall()->name(); }
+const char *to_edge_name() { return self->toEdge()->asRiseFall()->name().c_str(); }
 const TimingRole *role() { return self->role(); }
 
 float
@@ -449,7 +455,7 @@ voltage_time(float in_slew,
   return 0.0;
 }
 
-Table1
+Table
 voltage_waveform(float in_slew,
                  float load_cap)
 {
@@ -457,14 +463,14 @@ voltage_waveform(float in_slew,
   if (gate_model) {
     OutputWaveforms *waveforms = gate_model->outputWaveforms();
     if (waveforms) {
-      Table1 waveform = waveforms->voltageWaveform(in_slew, load_cap);
+      Table waveform = waveforms->voltageWaveform(in_slew, load_cap);
       return waveform;
     }
   }
-  return Table1();
+  return Table();
 }
 
-const Table1 *
+const Table *
 voltage_waveform_raw(float in_slew,
                      float load_cap)
 {
@@ -472,14 +478,14 @@ voltage_waveform_raw(float in_slew,
   if (gate_model) {
     OutputWaveforms *waveforms = gate_model->outputWaveforms();
     if (waveforms) {
-      const Table1 *waveform = waveforms->voltageWaveformRaw(in_slew, load_cap);
+      const Table *waveform = waveforms->voltageWaveformRaw(in_slew, load_cap);
       return waveform;
     }
   }
   return nullptr;
 }
 
-Table1
+Table
 current_waveform(float in_slew,
                  float load_cap)
 {
@@ -487,14 +493,14 @@ current_waveform(float in_slew,
   if (gate_model) {
     OutputWaveforms *waveforms = gate_model->outputWaveforms();
     if (waveforms) {
-      Table1 waveform = waveforms->currentWaveform(in_slew, load_cap);
+      Table waveform = waveforms->currentWaveform(in_slew, load_cap);
       return waveform;
     }
   }
-  return Table1();
+  return Table();
 }
 
-const Table1 *
+const Table *
 current_waveform_raw(float in_slew,
                      float load_cap)
 {
@@ -502,14 +508,14 @@ current_waveform_raw(float in_slew,
   if (gate_model) {
     OutputWaveforms *waveforms = gate_model->outputWaveforms();
     if (waveforms) {
-      const Table1 *waveform = waveforms->currentWaveformRaw(in_slew, load_cap);
+      const Table *waveform = waveforms->currentWaveformRaw(in_slew, load_cap);
       return waveform;
     }
   }
   return nullptr;
 }
 
-Table1
+Table
 voltage_current_waveform(float in_slew,
                          float load_cap)
 {
@@ -517,11 +523,11 @@ voltage_current_waveform(float in_slew,
   if (gate_model) {
     OutputWaveforms *waveforms = gate_model->outputWaveforms();
     if (waveforms) {
-      Table1 waveform = waveforms->voltageCurrentWaveform(in_slew, load_cap);
+      Table waveform = waveforms->voltageCurrentWaveform(in_slew, load_cap);
       return waveform;
     }
   }
-  return Table1();
+  return Table();
 }
 
 float
