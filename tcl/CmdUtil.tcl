@@ -237,6 +237,17 @@ proc delete_objects_from_list_cmd { list delete } {
   }
   return $list
 }
+
+################################################################
+
+define_cmd_args "remove_from_collection" {collection1 spec}
+
+# Remove objects matching spec from collection1 and return the result.
+# spec may be a collection or a list of object names; names are resolved
+# to the object type of collection1. collection1 itself is not modified.
+proc remove_from_collection { collection1 spec } {
+  return [delete_objects_from_list_cmd $collection1 $spec]
+}
   
 ################################################################
   
