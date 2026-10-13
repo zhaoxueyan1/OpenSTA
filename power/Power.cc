@@ -1566,10 +1566,14 @@ Power::findActivity(const Pin *pin)
     if (activity && activity->origin() != PwrActivityOrigin::unknown)
       return *activity;
     const Clock *clk = findClk(pin);
-    float duty = clockDuty(clk);
-    return PwrActivity(2.0 / clk->period(), duty, PwrActivityOrigin::clock);
+    // Clock-network membership is topological. Case analysis can prevent
+    // clock arrivals from reaching a pin that is still in that network.
+    if (clk) {
+      float duty = clockDuty(clk);
+      return PwrActivity(2.0 / clk->period(), duty, PwrActivityOrigin::clock);
+    }
   }
-  else if (global_activity_.isSet())
+  if (global_activity_.isSet())
     return global_activity_;
   else {
     PwrActivity *activity = findKeyValuePtr(activity_map_, pin);
