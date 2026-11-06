@@ -289,9 +289,9 @@ CheckFanouts::checkPin(const Pin *pin,
                        const Mode *mode) const
 {
   const Network *network = sta_->network();
+  // Fanout is a physical design rule; timing exceptions and constant
+  // propagation must not suppress this check.
   return network->isDriver(pin)
-    && !mode->sim()->isConstant(pin)
-    && !mode->sdc()->isDisabledConstraint(pin)
     && !mode->clkNetwork()->isIdealClock(pin);
 }
 
